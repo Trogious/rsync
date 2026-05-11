@@ -15,3 +15,16 @@ tracked in `NEWS.md` (inherited from upstream).
 - Created skeleton directories: `win32/`, `vcpkg/`, `scripts/`,
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
+
+### Phase 1 — Build infrastructure (Linux portion)
+- Added `vcpkg/vcpkg.json` manifest pinned to vcpkg release `2026.04.27`
+  (SHA `56bb2411609227288b70117ead2c47585ba07713`); OpenSSL overridden to
+  `3.6.1#3` (CVE-2026-34054 fix).
+- Added `scripts/bootstrap-windows.ps1` for one-time host setup.
+- Added `scripts/gnulib-import.sh` and ran it; imported 215 gnulib `.c`
+  sources and 211 `.m4` macros into `gl/` and `gl/m4/`.
+- Build-system integration (configure.ac, Makefile.in rules to compile
+  `gl/libgnu.a`) is deferred to Phase 2 — see PORTING.md "Build-system
+  mismatch".
+- Windows-only step (`vcpkg install --triplet x64-windows-static`) is
+  deferred to first Windows build.

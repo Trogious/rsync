@@ -25,6 +25,32 @@ Maintenance notes for the Windows native port. Every change to an upstream
       url = https://git.savannah.gnu.org/git/gnulib.git
   ```
 
+- **gnulib source-base**: PLAN.md specifies `--source-base=lib --m4-base=m4`.
+  We use `--source-base=gl --m4-base=gl/m4` because rsync's upstream `lib/`
+  and `m4/` directories already contain rsync's own source files (e.g.
+  `lib/md5.c`, `lib/getaddrinfo.c` from PostgreSQL). Putting gnulib polyfills
+  in those dirs would clobber or mix with them.
+
+- **gnulib `--libtool` dropped**: rsync uses a hand-written `Makefile.in`
+  with no Automake or libtool. We pass plain `--no-libtool` (default), so
+  gnulib generates `libgnu.a` rules instead of `libgnu.la`.
+
+- **vcpkg baseline**: PLAN.md specifies "2026.03.18 or later". We pin
+  `2026.04.27` (SHA `56bb2411609227288b70117ead2c47585ba07713`).
+
+### Build-system mismatch (open issue)
+
+Rsync's `Makefile.in` is hand-written (autoconf-only, no automake, no
+libtool). gnulib-tool generates `gl/Makefile.am` which expects automake.
+
+The Phase 2 work has to manually integrate gl/ into the rsync build:
+- Add `AC_CONFIG_MACRO_DIRS([gl/m4])` to `configure.ac`
+- Call `gl_EARLY` after `AC_PROG_CC` and `gl_INIT` later in `configure.ac`
+- Add custom rules to `Makefile.in` to build `gl/libgnu.a` from the file
+  list in `gl/Makefile.am`'s `libgnu_a_SOURCES`
+- Only build/link gl/ when `WIN32_NATIVE` is detected (Linux/BSD/macOS
+  builds should be unaffected)
+
 ## File map (Windows-specific code)
 
 - `win32/` — all native Windows replacements and stubs
