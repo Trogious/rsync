@@ -83,6 +83,11 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 | `rsync.h` | Inserted `#ifdef WIN32_NATIVE` / `#include "win32/win_compat.h"` block immediately after `#include "config.h"`. | Phase 2: pulls in Windows API headers, POSIX type stubs, and `win32/win_*.h` declarations. Block is inert when `WIN32_NATIVE` is undefined. |
 | `Makefile.in` | Added `WIN32_OBJS = @WIN32_OBJS@` line and appended `$(WIN32_OBJS)` to `OBJS`. | Phase 2: links the `win32/*.o` stubs into `rsync.exe`. Empty on Linux/macOS. |
 | `configure.ac` | Inside the `WIN32_NATIVE` shell block, set `WIN32_OBJS` to the list of `win32/*.o` files and `AC_SUBST` it. | Phase 2: feeds the object list to `Makefile.in` via `@WIN32_OBJS@`. |
+| `pipe.c` | `piped_child()`: added `#ifdef WIN32_NATIVE` branch that calls `win_spawn_remote_shell()` (via gnulib `create_pipe_bidi`); the rest of the function body is the unchanged Unix fork/exec path under `#else`. | Phase 3 Site 1: replaces fork+exec(ssh) for remote-shell transport. |
+| `pipe.c` | `local_child()`: added `#ifdef WIN32_NATIVE` branch that calls `win_reexec_self_as(WIN_ROLE_LOCAL_CHILD, ...)`; `#else` keeps the original Unix fork+pipe+child_main path. | Phase 3 Site 2: replaces fork+in-process-dispatch for local-to-local rsync. |
+| `main.c` | `main()`: added `#ifdef WIN32_NATIVE` block at the top that calls `win_child_init(argc, argv)`; if it returns `>= 0` the process exits with that code (we were a re-exec'd child). | Phase 3: child-side hook for the re-exec machinery in `pipe.c::local_child` and (eventually) `do_recv`. |
+| `main.c` | `do_recv()`: added `#ifdef WIN32_NATIVE` branch that prints an `RERR_UNSUPPORTED` error before the `do_fork()` call. Documented as a known limitation: downloads (FROM remote TO Windows) fail; uploads work. | Phase 3 Site 3 [DECIDE]: receiver/generator split needs `first_flist` + option-globals serialization (or thread-based redesign); deferred. |
+| `main.c` | `shell_exec()`: added `#ifdef WIN32_NATIVE` branch returning `system(cmd)`; `#else` keeps the `fork()+execlp($RSYNC_SHELL)` path. | Phase 3 Site 4: no `fork()` on Windows; `system()` honors PATH-based shell resolution via cmd.exe. |
 
 ## Fork sites (from upstream rsync 3.4.2)
 
@@ -95,6 +100,43 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 | 5 | `socket.c::sock_exec()` | Daemon-only; excised |
 | 6 | `socket.c::start_accept_loop()` | Daemon-only; excised |
 | 7 | `clientserver.c::become_daemon()` | Daemon-only; excised |
+
+## do_recv state preservation (open [DECIDE])
+
+`main.c::do_recv()` forks to split the local side into a generator (parent)
+and receiver (child) when downloading. After the fork on Unix, the child
+keeps full memory access to:
+
+- All option-parsed globals: `copy_links`, `tmpdir`, `backup_dir`,
+  `preserve_hard_links`, `inc_recurse`, `chmod_modes`, `am_server`, dozens
+  more.
+- `first_flist` — the linked list of file metadata received from the
+  remote sender, before the fork.
+
+A CreateProcess-based re-exec does NOT carry this state. The Phase 3
+stub currently errors out with `RERR_UNSUPPORTED`. Three design options
+to evaluate when iterating on Windows:
+
+1. **Serialize state.** Extend the state file written by `win_reexec.c`
+   to include each option global and a serialized form of `first_flist`.
+   Pros: matches upstream's process-isolation model. Cons: large surface,
+   ongoing maintenance burden as new option globals are added upstream.
+
+2. **Use threads.** On Windows, run the receiver in a worker thread of
+   the same process. Globals are shared; no serialization. Pros:
+   straightforward. Cons: upstream code uses `exit()` / `_exit()` in
+   places where a thread would need to bail differently; signal handling
+   differs; shared `io_*` state needs locks.
+
+3. **Windows fork-clone API.** Use `RtlCloneUserProcess` /
+   `NtCreateUserProcess` (mitchcapper's approach) to literally clone the
+   process. Pros: preserves state for free. Cons: undocumented API,
+   fragile across Windows versions, blocked by some EDR products.
+
+Recommended path: try (2) first — bind a thread to "the receiver role"
+and use a `Sleep`-free message channel between generator and receiver
+via in-memory queues instead of pipes. Fallback to (1) if upstream's
+`exit()`/`io_flush_msg` pattern can't be threaded cleanly.
 
 ## Conventions
 

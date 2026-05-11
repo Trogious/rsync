@@ -47,6 +47,19 @@ extern struct chmod_mode_struct *chmod_modes;
  **/
 pid_t piped_child(char **command, int *f_in, int *f_out)
 {
+#ifdef WIN32_NATIVE
+	pid_t pid;
+
+	if (DEBUG_GTE(CMD, 1))
+		print_child_argv("opening connection using:", command);
+
+	pid = win_spawn_remote_shell(command, f_in, f_out);
+	if (pid == (pid_t)-1) {
+		rsyserr(FERROR, errno, "Failed to spawn %s", command[0]);
+		exit_cleanup(RERR_IPC);
+	}
+	return pid;
+#else
 	pid_t pid;
 	int to_child_pipe[2];
 	int from_child_pipe[2];
@@ -94,6 +107,7 @@ pid_t piped_child(char **command, int *f_in, int *f_out)
 	*f_out = to_child_pipe[1];
 
 	return pid;
+#endif /* WIN32_NATIVE */
 }
 
 /* This function forks a child which calls child_main().  First,
@@ -109,6 +123,21 @@ pid_t piped_child(char **command, int *f_in, int *f_out)
 pid_t local_child(int argc, char **argv, int *f_in, int *f_out,
 		  int (*child_main)(int, char*[]))
 {
+#ifdef WIN32_NATIVE
+	(void)child_main;  /* The child re-executes rsync.exe; win_child_init
+	                    * dispatches it to child_main via WIN_ROLE_LOCAL_CHILD. */
+	pid_t pid;
+
+	/* The parent process is always the sender for a local rsync. */
+	assert(am_sender);
+
+	pid = win_reexec_self_as(WIN_ROLE_LOCAL_CHILD, argc, argv, f_in, f_out);
+	if (pid == (pid_t)-1) {
+		rsyserr(FERROR, errno, "win_reexec_self_as(local-child) failed");
+		exit_cleanup(RERR_IPC);
+	}
+	return pid;
+#else
 	pid_t pid;
 	int to_child_pipe[2];
 	int from_child_pipe[2];
@@ -175,4 +204,5 @@ pid_t local_child(int argc, char **argv, int *f_in, int *f_out,
 	*f_out = to_child_pipe[1];
 
 	return pid;
+#endif /* WIN32_NATIVE */
 }

@@ -16,6 +16,29 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 3 — Fork emulation (Linux portion, 3 of 4 sites)
+- `pipe.c::piped_child`: Windows branch calls `win_spawn_remote_shell`
+  (gnulib `create_pipe_bidi` — spawns ssh.exe with bidirectional pipes).
+- `pipe.c::local_child`: Windows branch calls
+  `win_reexec_self_as(WIN_ROLE_LOCAL_CHILD, ...)`.
+- `main.c::main`: at the top, calls `win_child_init` to dispatch
+  re-exec'd children before normal startup.
+- `main.c::shell_exec`: Windows branch calls `system(cmd)` (no fork on
+  Windows).
+- `win32/win_spawn.c`: real implementation using `gl/spawn-pipe.h`.
+- `win32/win_reexec.c`: CreateProcess machinery + binary state-file
+  serialization + handle inheritance. Supports LOCAL_CHILD; RECEIVER /
+  GENERATOR return `RERR_UNSUPPORTED`.
+- `win32/win_child_init.c`: child-side marker detection
+  (`--_win_child=<state>`), state load, dispatch.
+- `main.c::do_recv` [DECIDE wall]: Phase 3 Site 3 cannot be completed
+  in this Linux session — the receiver/generator split requires
+  preserving in-memory state (`first_flist` and option globals).
+  Stub-and-defer: Windows hits `RERR_UNSUPPORTED` with a clear message
+  pointing at PORTING.md "do_recv state preservation". Downloads
+  (FROM remote TO Windows) do not work yet; uploads do.
+- Linux regression: `./rsync -av /tmp/src/ /tmp/dst/` still works.
+
 ### Phase 2 — WIN32_NATIVE guards + win32/ stubs (Linux portion)
 - `configure.ac`: added `WIN32_NATIVE` detection via `AC_PREPROC_IFELSE`;
   on Windows, appends `-lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32
