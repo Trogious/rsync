@@ -520,8 +520,16 @@ static pid_t do_cmd(char *cmd, char *machine, char *user, char **remote_argv, in
 		char *rsh_env = getenv(RSYNC_RSH_ENV);
 		if (!cmd)
 			cmd = rsh_env;
-		if (!cmd)
+		if (!cmd) {
+#ifdef WIN32_NATIVE
+			/* Prefer the built-in Windows OpenSSH client at
+			 * %SystemRoot%\System32\OpenSSH\ssh.exe if it exists;
+			 * otherwise fall back to "ssh.exe" on PATH. */
+			cmd = (char *)win_default_rsh();
+#else
 			cmd = RSYNC_RSH;
+#endif
+		}
 		cmd = need_to_free = strdup(cmd);
 
 		for (t = f = cmd; *f; f++) {

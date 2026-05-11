@@ -16,6 +16,16 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 5 — SSH integration (Linux portion)
+- `win32/win_ssh.c::win_default_rsh`: real implementation. Lookup
+  order: `$RSYNC_RSH` → `%SystemRoot%\System32\OpenSSH\ssh.exe`
+  (if present) → `ssh.exe` (PATH fallback).
+- `main.c`: in the remote-shell-cmd discovery block, use
+  `win_default_rsh()` on Windows instead of `RSYNC_RSH` macro.
+  Effect: a user with neither `RSYNC_RSH` nor `-e` set gets the
+  built-in Windows OpenSSH client automatically.
+- Linux regression: clean rebuild verified.
+
 ### Phase 4 — Filesystem & path handling (Linux portion)
 - `options.c::check_for_hostspec`: Windows branch returns NULL (local
   path) for drive-letter (`C:\..`, `C:/..`) and UNC (`\\..`) paths.
