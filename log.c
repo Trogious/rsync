@@ -27,7 +27,7 @@ extern int dry_run;
 extern int am_daemon;
 extern int am_server;
 extern int am_sender;
-extern int am_generator;
+extern ROLE_TLS int am_generator;
 extern int local_server;
 extern int quiet;
 extern int module_id;
@@ -68,8 +68,8 @@ static FILE *logfile_fp;
 struct stats stats;
 
 int got_xfer_error = 0;
-int output_needs_newline = 0;
-int send_msgs_to_gen = 0;
+ROLE_TLS int output_needs_newline = 0;
+ROLE_TLS int send_msgs_to_gen = 0;
 
 static int64 initial_data_written;
 static int64 initial_data_read;

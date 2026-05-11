@@ -73,7 +73,7 @@ extern OFF_T min_size;
 extern int io_error;
 extern int flist_eof;
 extern int allowed_lull;
-extern int sock_f_out;
+extern ROLE_TLS int sock_f_out;
 extern int protocol_version;
 extern int file_total;
 extern int fuzzy_basis;

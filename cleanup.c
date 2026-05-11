@@ -25,13 +25,13 @@
 extern int dry_run;
 extern int am_server;
 extern int am_daemon;
-extern int am_receiver;
+extern ROLE_TLS int am_receiver;
 extern int am_sender;
 extern int io_error;
 extern int keep_partial;
 extern int got_xfer_error;
 extern int protocol_version;
-extern int output_needs_newline;
+extern ROLE_TLS int output_needs_newline;
 extern char *partial_dir;
 extern char *logfile_name;
 

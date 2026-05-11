@@ -322,6 +322,15 @@ enum delret {
 # include "win32/win_compat.h"
 #endif
 
+/* ROLE_TLS marks globals whose value must diverge between the parent
+ * (generator/sender) and child (receiver/server) branches of rsync's
+ * IPC. fork() handles this for us on POSIX; on Windows we run the two
+ * branches in threads of one process, so the variable becomes thread-
+ * local storage. Inert (empty) on POSIX. */
+#ifndef ROLE_TLS
+# define ROLE_TLS
+#endif
+
 /* The default RSYNC_RSH is always set in config.h. */
 
 #include <stdio.h>

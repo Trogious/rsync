@@ -39,8 +39,8 @@ extern size_t bwlimit_writemax;
 extern int io_timeout;
 extern int am_server;
 extern int am_sender;
-extern int am_receiver;
-extern int am_generator;
+extern ROLE_TLS int am_receiver;
+extern ROLE_TLS int am_generator;
 extern int local_server;
 extern int msgs2stderr;
 extern int inc_recurse;
@@ -80,15 +80,19 @@ BOOL flist_receiving_enabled = False;
 int kluge_around_eof = 0;
 int got_kill_signal = -1; /* is set to 0 only after multiplexed I/O starts */
 
-int sock_f_in = -1;
-int sock_f_out = -1;
+ROLE_TLS int sock_f_in = -1;   /* generator clears to -1; receiver too via different field */
+ROLE_TLS int sock_f_out = -1;
 
 int64 total_data_read = 0;
 int64 total_data_written = 0;
 
 char num_dev_ino_buf[4 + 8 + 8];
 
-static struct {
+/* iobuf — the I/O dispatcher state. On Windows the receiver and
+ * generator run as threads sharing the same address space, so the
+ * struct is ROLE_TLS to give each role its own buffers, fds, and
+ * multiplexing state. Inert on POSIX (fork already isolated this). */
+static ROLE_TLS struct {
 	xbuf in, out, msg;
 	int in_fd;
 	int out_fd; /* Both "out" and "msg" go to this fd. */

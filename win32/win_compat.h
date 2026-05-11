@@ -205,6 +205,29 @@ int win_select(int nfds, fd_set *readfds, fd_set *writefds,
                fd_set *exceptfds, struct timeval *timeout);
 #define select(n, r, w, e, t) win_select((n), (r), (w), (e), (t))
 
+/* ROLE_TLS — thread-local storage qualifier for globals that diverge
+ * after the receiver/generator or sender/server split. On Linux fork()
+ * gives each side a private copy automatically; on Windows we run those
+ * two paths in two THREADS of one process, so the divergent globals
+ * must be per-thread. Inert on non-Windows builds.
+ *
+ * Apply to the DEFINITION of a global (in its .c file). The matching
+ * `extern` declarations in headers don't need the qualifier on MSVC. */
+#define ROLE_TLS __declspec(thread)
+
+/* win_thread_fork(fn, arg) — Windows replacement for fork() in the
+ * specific case where the "child" path is going to call a known
+ * function with its own arguments (do_recv's receiver branch,
+ * local_child's server branch). Returns:
+ *   - On the calling thread, immediately, a "fake pid" that
+ *     win_waitpid() can be called on (registered in the same
+ *     pid -> HANDLE table that win_fork uses).
+ *   - The new thread runs fn(arg). When it returns, the thread's
+ *     exit code becomes the pid's wait result.
+ * Errors return (pid_t)-1 with errno set. */
+typedef int (*win_thread_main_t)(void *arg);
+pid_t win_thread_fork(win_thread_main_t fn, void *arg);
+
 /* POSIX permission bits — MSVC's sys/stat.h has _S_IREAD/_S_IWRITE/
  * _S_IEXEC for owner only. Define the rest as zero (Windows ACLs
  * don't map cleanly onto rwx/group/other). */

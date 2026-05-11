@@ -5,6 +5,62 @@ tracked in `NEWS.md` (inherited from upstream).
 
 ## Unreleased
 
+### Windows: threads-instead-of-fork infrastructure for do_recv (2026-05-11)
+- **Approach**: replace `fork()` in `do_recv` with a thread on Windows
+  (`local_child`'s thread refactor is deferred). The receiver branch
+  becomes a function that runs in a freshly-spawned thread; the
+  parent thread continues as the generator. The two threads share the
+  process's heap, fd table, and any global that isn't marked
+  `ROLE_TLS` (`__declspec(thread)`).
+- **Key learning — extern declarations of TLS variables matter**.
+  When a `__declspec(thread)` variable is *defined* in one .c file
+  but accessed via plain `extern int foo;` in another, MSVC emits
+  regular data-section access code for the access — which goes to
+  the wrong memory and crashes on write. Every `extern` declaration
+  needs the matching `ROLE_TLS` qualifier. Updated across cleanup.c,
+  exclude.c, flist.c, generator.c, io.c, log.c, main.c, progress.c,
+  rsync.c, xattrs.c.
+- **Globals marked ROLE_TLS**: `am_receiver`, `am_generator`
+  (main.c), `sock_f_in`, `sock_f_out` (io.c), `iobuf` (io.c file-
+  static struct — the I/O dispatcher's per-role state),
+  `send_msgs_to_gen`, `output_needs_newline` (log.c). `am_sender`,
+  `am_server`, `filesfrom_fd`, `munge_symlinks` (options.c) are NOT
+  TLS because they appear in static initializers of `long_options[]`
+  via `&am_server`, and MSVC forbids `__declspec(thread)` addresses
+  in static initializers. Local_child's thread refactor (deferred)
+  will need a different mechanism for those.
+- **New files**:
+  - `win32/win_thread.c` — `win_thread_fork(fn, arg)` uses
+    `_beginthreadex` (NOT `CreateThread`; the latter skips CRT
+    per-thread init, causing later `fopen`/`malloc` crashes).
+    Returns the thread's TID as a fake pid; the HANDLE goes into the
+    same pid→HANDLE table that `win_fork` maintains, so
+    `win_waitpid()` works unchanged.
+  - `ROLE_TLS` macro defined in `rsync.h` (empty on POSIX,
+    `__declspec(thread)` on Windows via win_compat.h).
+- **`do_recv` refactor**: the receiver branch extracted into
+  `do_recv_receiver()`. POSIX path: fork, child calls
+  `do_recv_receiver()` inside `exit_cleanup()`. Windows path:
+  `win_thread_fork(do_recv_thread_main, args)` with a brief
+  `Sleep(50)` to let the new thread reach its setup before the
+  parent advances. `close(error_pipe[1])` deferred on Windows until
+  after `wait_process_with_flush` because both threads share the fd
+  table — closing the receiver's write end early would crash it.
+- **`pid == 0` infinite-sleep loop at the end of the receiver
+  branch**: skipped on Windows. POSIX rsync's receiver blocks
+  forever waiting for `SIGUSR2` from the generator; the generator
+  does `kill(pid, SIGUSR2)` at shutdown. We can't signal a thread,
+  so on Windows the receiver returns cleanly after
+  `read_final_goodbye`, and the generator's `kill(pid, SIGUSR2)`
+  reduces to a no-op (our `kill` shim) while
+  `wait_process_with_flush` does the actual join.
+- **Status**: build is clean, push regression is clean. Pull gets as
+  far as the receiver thread reaching `recv_files()` and the parent
+  thread reaching `generate_files()`, then the process dies — either
+  one of those (or something they call) touches a non-TLS-ed global
+  that races, or hits some other shared-state bug we haven't
+  bottomed out yet. Tracked as continuation of task #6.
+
 ### Windows SSH-push works end-to-end (2026-05-11)
 - **Outcome**: `rsync.exe -av <localdir> user@host:/path/` transfers files
   over SSH to a Linux rsync server and verifies byte-exact on both ends.

@@ -43,7 +43,7 @@ extern int inc_recurse;
 extern int blocking_io;
 extern int always_checksum;
 extern int remove_source_files;
-extern int output_needs_newline;
+extern ROLE_TLS int output_needs_newline;
 extern int called_from_signal_handler;
 extern int need_messages_from_generator;
 extern int kluge_around_eof;
@@ -73,11 +73,11 @@ extern int whole_file;
 extern int read_batch;
 extern int write_batch;
 extern int batch_fd;
-extern int sock_f_in;
-extern int sock_f_out;
+extern ROLE_TLS int sock_f_in;
+extern ROLE_TLS int sock_f_out;
 extern int filesfrom_fd;
 extern int connect_timeout;
-extern int send_msgs_to_gen;
+extern ROLE_TLS int send_msgs_to_gen;
 extern dev_t filesystem_dev;
 extern pid_t cleanup_child_pid;
 extern size_t bwlimit_writemax;
@@ -110,8 +110,8 @@ extern filter_rule_list daemon_filter_list, implied_filter_list;
 
 uid_t our_uid;
 gid_t our_gid;
-int am_receiver = 0;  /* Only set to 1 after the receiver/generator fork. */
-int am_generator = 0; /* Only set to 1 after the receiver/generator fork. */
+ROLE_TLS int am_receiver = 0;  /* Only set to 1 after the receiver/generator split. */
+ROLE_TLS int am_generator = 0; /* Only set to 1 after the receiver/generator split. */
 int local_server = 0;
 int daemon_connection = 0; /* 0 = no daemon, 1 = daemon via remote shell, -1 = daemon via socket */
 mode_t orig_umask = 0;
@@ -981,6 +981,107 @@ static void do_server_sender(int f_in, int f_out, int argc, char *argv[])
 }
 
 
+/* On Windows, the receiver branch of do_recv runs as a thread instead
+ * of a fork()'d process (RtlCloneUserProcess deadlocks; see PORTING.md
+ * "fork() and waitpid() on Windows"). The thread function receives this
+ * struct so it can replicate the same setup the post-fork child block
+ * does, with local variables matching the parent's at the split point. */
+struct do_recv_args {
+	int   f_in;
+	int   f_out;
+	int   error_pipe_w;   /* receiver writes errors here */
+	char *local_name;
+};
+
+/* The receiver branch from the do_recv split, extracted so it can be
+ * driven either by fork() (POSIX) or by a thread (Windows). Both flows
+ * arrange the file descriptors so the receiver writes to error_pipe_w
+ * and the generator reads from error_pipe_r; this function only sees
+ * its write end.
+ *
+ * Returns the exit code the receiver wants. On POSIX the caller wraps
+ * the return in exit_cleanup(); on Windows the thread trampoline turns
+ * it into the thread's exit code (visible via win_waitpid). */
+static int do_recv_receiver(int f_in, int f_out_to_close,
+                            int error_pipe_w, char *local_name)
+{
+	int f_out;
+
+	am_receiver = 1;
+	send_msgs_to_gen = am_server;
+
+	/* We can't let two processes write to the socket at one time. */
+	io_end_multiplex_out(MPLX_SWITCHING);
+	if (f_out_to_close != -1)
+		close(f_out_to_close);
+	sock_f_out = -1;
+	f_out = error_pipe_w;
+
+	bwlimit_writemax = 0; /* receiver doesn't need to do this */
+
+	if (read_batch)
+		io_start_buffering_in(f_in);
+	io_start_multiplex_out(f_out);
+
+	recv_files(f_in, f_out, local_name);
+	io_flush(FULL_FLUSH);
+	handle_stats(f_in);
+
+	if (output_needs_newline) {
+		fputc('\n', stdout);
+		output_needs_newline = 0;
+	}
+
+	write_int(f_out, NDX_DONE);
+	send_msg(MSG_STATS, (char*)&stats.total_read, sizeof stats.total_read, 0);
+	io_flush(FULL_FLUSH);
+
+	/* Handle any keep-alive packets from the post-processing work that
+	 * the generator does. */
+	if (protocol_version >= 29) {
+		kluge_around_eof = -1;
+#ifdef WIN32_NATIVE
+		/* On Windows the generator can't kill(pid, SIGUSR2) — we're a
+		 * thread. The generator instead writes NDX_DONE and lets us
+		 * detect EOF via the closed pipe. read_final_goodbye returns
+		 * naturally in that case. */
+		read_final_goodbye(f_in, f_out);
+		return 0;
+#else
+		/* This should only get stopped via a USR2 signal. */
+		read_final_goodbye(f_in, f_out);
+
+		rprintf(FERROR, "Invalid packet at end of run [%s]\n",
+			who_am_i());
+		exit_cleanup(RERR_PROTOCOL);
+#endif
+	}
+
+#ifdef WIN32_NATIVE
+	return 0;
+#else
+	/* Finally, we go to sleep until our parent kills us with a USR2
+	 * signal.  We sleep for a short time, as on some OSes a signal
+	 * won't interrupt a sleep! */
+	while (1)
+		msleep(20);
+	return 0; /* not reached */
+#endif
+}
+
+#ifdef WIN32_NATIVE
+/* Thread trampoline for the Windows do_recv split. Frees the args
+ * struct, hands the return value to win_thread_trampoline which uses
+ * it as the thread exit code. */
+static int do_recv_thread_main(void *p)
+{
+	struct do_recv_args *a = (struct do_recv_args *)p;
+	int rc = do_recv_receiver(a->f_in, a->f_out, a->error_pipe_w, a->local_name);
+	free(a);
+	return rc;
+}
+#endif
+
 static int do_recv(int f_in, int f_out, char *local_name)
 {
 	int pid;
@@ -1043,62 +1144,48 @@ static int do_recv(int f_in, int f_out, char *local_name)
 
 	io_flush(FULL_FLUSH);
 
+#ifdef WIN32_NATIVE
+	{
+		/* Windows: spawn the receiver as a thread (RtlCloneUserProcess
+		 * deadlocks; see PORTING.md). Divergent globals are ROLE_TLS so
+		 * the receiver thread sees them at default/zero values. Pass
+		 * f_out_to_close = -1 because the thread shares the parent's
+		 * fd table — we don't want the receiver to close f_out from
+		 * under the generator. The parent keeps error_pipe[1] open
+		 * until the receiver thread joins; the deferred-close happens
+		 * after wait_process_with_flush. */
+		struct do_recv_args *args = (struct do_recv_args *)malloc(sizeof(*args));
+		if (!args) { errno = ENOMEM; pid = -1; }
+		else {
+			args->f_in         = f_in;
+			args->f_out        = -1;
+			args->error_pipe_w = error_pipe[1];
+			args->local_name   = local_name;
+			pid = win_thread_fork(do_recv_thread_main, args);
+			if (pid == (pid_t)-1) free(args);
+		}
+		if (pid == -1) {
+			rsyserr(FERROR, errno, "thread-fork failed in do_recv");
+			exit_cleanup(RERR_IPC);
+		}
+		/* Yield briefly so the new thread reaches its setup before the
+		 * parent advances to generate_files() and starts reading from
+		 * error_pipe[0]. Avoids a transient EOF if the parent gets
+		 * scheduler priority. */
+		Sleep(50);
+	}
+#else
 	if ((pid = do_fork()) == -1) {
 		rsyserr(FERROR, errno, "fork failed in do_recv");
 		exit_cleanup(RERR_IPC);
 	}
 
 	if (pid == 0) {
-		am_receiver = 1;
-		send_msgs_to_gen = am_server;
-
 		close(error_pipe[0]);
-
-		/* We can't let two processes write to the socket at one time. */
-		io_end_multiplex_out(MPLX_SWITCHING);
-		if (f_in != f_out)
-			close(f_out);
-		sock_f_out = -1;
-		f_out = error_pipe[1];
-
-		bwlimit_writemax = 0; /* receiver doesn't need to do this */
-
-		if (read_batch)
-			io_start_buffering_in(f_in);
-		io_start_multiplex_out(f_out);
-
-		recv_files(f_in, f_out, local_name);
-		io_flush(FULL_FLUSH);
-		handle_stats(f_in);
-
-		if (output_needs_newline) {
-			fputc('\n', stdout);
-			output_needs_newline = 0;
-		}
-
-		write_int(f_out, NDX_DONE);
-		send_msg(MSG_STATS, (char*)&stats.total_read, sizeof stats.total_read, 0);
-		io_flush(FULL_FLUSH);
-
-		/* Handle any keep-alive packets from the post-processing work
-		 * that the generator does. */
-		if (protocol_version >= 29) {
-			kluge_around_eof = -1;
-
-			/* This should only get stopped via a USR2 signal. */
-			read_final_goodbye(f_in, f_out);
-
-			rprintf(FERROR, "Invalid packet at end of run [%s]\n",
-				who_am_i());
-			exit_cleanup(RERR_PROTOCOL);
-		}
-
-		/* Finally, we go to sleep until our parent kills us with a
-		 * USR2 signal.  We sleep for a short time, as on some OSes
-		 * a signal won't interrupt a sleep! */
-		while (1)
-			msleep(20);
+		exit_cleanup(do_recv_receiver(f_in, (f_in != f_out) ? f_out : -1,
+		                              error_pipe[1], local_name));
 	}
+#endif
 
 	am_generator = 1;
 	implied_filter_list.head = implied_filter_list.tail = NULL;
@@ -1108,9 +1195,15 @@ static int do_recv(int f_in, int f_out, char *local_name)
 	if (write_batch && !am_server)
 		stop_write_batch();
 
-	close(error_pipe[1]);
+#ifndef WIN32_NATIVE
+	close(error_pipe[1]);   /* on Linux this side is the receiver's; on
+	                         * Windows both threads share the fd table, so
+	                         * closing error_pipe[1] here would yank the
+	                         * receiver thread's write end. Cleanup happens
+	                         * after wait_process_with_flush instead. */
 	if (f_in != f_out)
 		close(f_in);
+#endif
 	sock_f_in = -1;
 	f_in = error_pipe[0];
 
@@ -1138,6 +1231,15 @@ static int do_recv(int f_in, int f_out, char *local_name)
 
 	kill(pid, SIGUSR2);
 	wait_process_with_flush(pid, &exit_code);
+
+#ifdef WIN32_NATIVE
+	/* Now safe to release the fds we kept open while the receiver thread
+	 * was running. */
+	close(error_pipe[1]);
+	close(error_pipe[0]);
+#else
+	close(error_pipe[0]);
+#endif
 	return exit_code;
 }
 

@@ -88,6 +88,11 @@ int do_compression = 0;
 int do_compression_level = CLVL_NOT_SPECIFIED;
 int do_compression_threads = 0; /*n = 0 use rsync thread, n >= 1 spawn n threads for compression */
 int am_root = 0; /* 0 = normal, 1 = root, 2 = --super, -1 = --fake-super */
+/* NOTE: am_server / am_sender are NOT ROLE_TLS even though local_child's
+ * child branch flips them. MSVC forbids __declspec(thread) variables in
+ * static initializers (long_options[] takes &am_server). When we get to
+ * local_child's thread refactor we'll need a different mechanism (e.g.
+ * a per-thread accessor) for these two. */
 int am_server = 0;
 int am_sender = 0;
 int am_starting_up = 1;
@@ -103,7 +108,7 @@ int io_timeout = 0;
 int prune_empty_dirs = 0;
 int use_qsort = 0;
 char *files_from = NULL;
-int filesfrom_fd = -1;
+int filesfrom_fd = -1;  /* see note above on am_server: can't be TLS due to long_options[] */
 char *filesfrom_host = NULL;
 int eol_nulls = 0;
 int protect_args = -1;
@@ -118,7 +123,7 @@ int connect_timeout = 0;
 int keep_partial = 0;
 int safe_symlinks = 0;
 int copy_unsafe_links = 0;
-int munge_symlinks = 0;
+int munge_symlinks = 0;  /* see note above on am_server: can't be TLS */
 int size_only = 0;
 int daemon_bwlimit = 0;
 int bwlimit = 0;
