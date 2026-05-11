@@ -19,6 +19,13 @@
  */
 
 #include "rsync.h"
+
+/* Entire file excised on Windows: rsync daemon auth isn't used.
+ * Note: we don't currently support rsync-over-ssl on Windows either;
+ * if that changes, the base64 helpers here could be moved to a
+ * non-daemon translation unit. */
+#ifndef WIN32_NATIVE
+
 #include "itypes.h"
 #include "ifuncs.h"
 
@@ -374,3 +381,5 @@ void auth_client(int fd, const char *user, const char *challenge)
 	generate_hash(pass, challenge, pass2);
 	io_printf(fd, "%s %s\n", user, pass2);
 }
+
+#endif /* !WIN32_NATIVE */

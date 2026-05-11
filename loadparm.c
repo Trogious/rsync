@@ -41,6 +41,10 @@
  */
 
 #include "rsync.h"
+
+/* Entire file excised on Windows: rsyncd.conf parsing is not used. */
+#ifndef WIN32_NATIVE
+
 #include "itypes.h"
 #include "ifuncs.h"
 #include "default-dont-compress.h"
@@ -590,3 +594,5 @@ int lp_number(char *name)
 
 	return i;
 }
+
+#endif /* !WIN32_NATIVE */

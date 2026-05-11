@@ -27,12 +27,12 @@ int daemon_main(void)
     return RERR_UNSUPPORTED;
 }
 
-int start_accept_loop(int port, int (*fn)(int, int))
+void start_accept_loop(int port, int (*fn)(int, int))
 {
     (void)port; (void)fn;
     rprintf(FERROR,
         "rsync daemon mode is not supported in this Windows build\n");
-    return RERR_UNSUPPORTED;
+    exit_cleanup(RERR_UNSUPPORTED);
 }
 
 int start_socket_client(char *host,

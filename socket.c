@@ -530,6 +530,9 @@ static void sigchld_handler(UNUSED(int val))
 }
 
 
+#ifndef WIN32_NATIVE
+/* start_accept_loop: daemon-only TCP accept loop. The Windows build
+ * supplies an error-stub version in win32/stub_daemon.c instead. */
 void start_accept_loop(int port, int (*fn)(int, int))
 {
 	fd_set deffds;
@@ -622,6 +625,7 @@ void start_accept_loop(int port, int (*fn)(int, int))
 		}
 	}
 }
+#endif /* !WIN32_NATIVE — end of start_accept_loop */
 
 
 enum SOCK_OPT_TYPES {OPT_BOOL,OPT_INT,OPT_ON};

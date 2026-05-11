@@ -93,6 +93,13 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 | `syscall.c` | `do_symlink()`: added `#ifdef WIN32_NATIVE` branch calling `win_symlink()`. `do_link()`: extended the gate to include `WIN32_NATIVE` and added a branch calling `win_link()`. `do_chmod()`: extended the gate; wraps Windows path in `#ifdef WIN32_NATIVE` short-circuit at top of function. | Phase 4 Tasks 4.4–4.5: native symlink, hardlink, and mode-bit handling via `CreateSymbolicLinkA`, `CreateHardLinkA`, `SetFileAttributesA`. |
 | `win32/rsync.manifest` | New file. Sets `longPathAware=true` (Win10 1607+) and `activeCodePage=UTF-8` (Win10 1903+); `asInvoker` execution level. | Phase 4 Task 4.2: enables paths longer than 260 characters and UTF-8 narrow-API path handling. Embedded into `rsync.exe` resource section via `mt.exe` in `build-windows.ps1`. |
 | `main.c` | In the remote-shell discovery block (`!cmd` after env-var check): on Windows, call `win_default_rsh()` instead of using `RSYNC_RSH` compile-time default. | Phase 5: prefer Windows' built-in OpenSSH client at `%SystemRoot%\System32\OpenSSH\ssh.exe` when present, fall back to `ssh.exe` on PATH. |
+| `options.c` | `parse_arguments` `case OPT_DAEMON`: on Windows, `rprintf(FERROR, ...)` and `exit_cleanup(RERR_UNSUPPORTED)`. | Phase 6: rejects `--daemon`, `--config`, `--dparam`, `--no-detach`. |
+| `options.c` | `check_for_hostspec` URL branch: on Windows, error + `exit_cleanup(RERR_UNSUPPORTED)` before parsing `rsync://`. | Phase 6: rejects `rsync://` daemon URLs early. |
+| `clientserver.c` | Entire file body wrapped in `#ifndef WIN32_NATIVE` ... `#endif` (after `#include "rsync.h"`). | Phase 6: daemon TCP / rsyncd / daemon-auth code. Stub entry points live in `win32/stub_daemon.c`. |
+| `loadparm.c` | Entire file body wrapped in `#ifndef WIN32_NATIVE` ... `#endif`. | Phase 6: rsyncd.conf parsing — unused. |
+| `access.c` | Entire file body wrapped in `#ifndef WIN32_NATIVE` ... `#endif`. | Phase 6: daemon access-control — unused. |
+| `authenticate.c` | Entire file body wrapped in `#ifndef WIN32_NATIVE` ... `#endif`. | Phase 6: daemon auth — unused. |
+| `socket.c` | `start_accept_loop` function only wrapped in `#ifndef WIN32_NATIVE`. | Phase 6: daemon accept loop. Rest of `socket.c` (open_socket_out, set_socket_options, etc.) still compiles for utility use. |
 
 ## Fork sites (from upstream rsync 3.4.2)
 

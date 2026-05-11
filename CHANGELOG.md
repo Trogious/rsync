@@ -16,6 +16,22 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 6 — Daemon excision (Linux portion)
+- `options.c::parse_arguments` case `OPT_DAEMON`: on Windows, error +
+  exit with `RERR_UNSUPPORTED`. Rejects `--daemon`, `--config`,
+  `--dparam`, `--no-detach`.
+- `options.c::check_for_hostspec` URL branch: on Windows, error +
+  exit before parsing `rsync://` URLs.
+- `clientserver.c`, `loadparm.c`, `access.c`, `authenticate.c`:
+  entire file body wrapped in `#ifndef WIN32_NATIVE` ... `#endif`.
+  Compiles to empty translation units on Windows.
+- `socket.c::start_accept_loop`: wrapped in `#ifndef WIN32_NATIVE`.
+  Rest of socket.c still compiles for utility use.
+- `win32/stub_daemon.c`: fixed `start_accept_loop` return type
+  (void, matches upstream); now calls `exit_cleanup(RERR_UNSUPPORTED)`.
+- Linux full rebuild verified (all daemon files compile normally on
+  Linux — wraps are inert).
+
 ### Phase 5 — SSH integration (Linux portion)
 - `win32/win_ssh.c::win_default_rsh`: real implementation. Lookup
   order: `$RSYNC_RSH` → `%SystemRoot%\System32\OpenSSH\ssh.exe`

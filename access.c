@@ -19,6 +19,10 @@
  */
 
 #include "rsync.h"
+
+/* Entire file excised on Windows: daemon access-control rules aren't used. */
+#ifndef WIN32_NATIVE
+
 #include "ifuncs.h"
 #ifdef HAVE_NETGROUP_H
 #include <netgroup.h>
@@ -290,3 +294,5 @@ int allow_access(const char *addr, const char **host_ptr, int i)
 	/* Allow all other access. */
 	return 1;
 }
+
+#endif /* !WIN32_NATIVE */

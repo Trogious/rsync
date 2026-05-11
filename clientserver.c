@@ -20,6 +20,13 @@
  */
 
 #include "rsync.h"
+
+/* Entire file is excised on Windows: rsync daemon mode is not
+ * supported (see PORTING.md). The error stubs for entry points that
+ * other source files reference (start_daemon, daemon_main,
+ * start_socket_client) live in win32/stub_daemon.c. */
+#ifndef WIN32_NATIVE
+
 #include "itypes.h"
 #include "ifuncs.h"
 
@@ -1539,3 +1546,5 @@ int daemon_main(void)
 	start_accept_loop(rsync_port, start_daemon);
 	return -1;
 }
+
+#endif /* !WIN32_NATIVE */
