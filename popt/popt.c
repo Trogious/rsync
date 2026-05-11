@@ -12,7 +12,9 @@
 
 #include <float.h>
 #include <math.h>
+#ifndef WIN32_NATIVE
 #include <unistd.h>
+#endif
 #include <limits.h>
 #include <errno.h>
 

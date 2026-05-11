@@ -33,7 +33,9 @@
 #ifdef HAVE_NETINET_IP_H
 #include <netinet/ip.h>
 #endif
+#ifndef WIN32_NATIVE
 #include <netinet/tcp.h>
+#endif
 
 extern char *bind_address;
 extern char *sockopts;

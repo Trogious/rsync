@@ -44,8 +44,8 @@ Remove-Item -Recurse -Force $src, $dst
 
 Write-Host '== --daemon rejected =='
 & $Binary --daemon 2>$null
-if ($LASTEXITCODE -ne 14) {
-    Write-Warning "Expected exit 14 (RERR_UNSUPPORTED) for --daemon, got $LASTEXITCODE"
+if ($LASTEXITCODE -ne 4) {
+    Write-Warning "Expected exit 4 (RERR_UNSUPPORTED) for --daemon, got $LASTEXITCODE"
 } else {
     Write-Host 'OK: --daemon -> RERR_UNSUPPORTED'
 }

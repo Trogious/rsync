@@ -38,34 +38,24 @@ Maintenance notes for the Windows native port. Every change to an upstream
 - **vcpkg baseline**: PLAN.md specifies "2026.03.18 or later". We pin
   `2026.04.27` (SHA `56bb2411609227288b70117ead2c47585ba07713`).
 
-### Build-system mismatch (open issue)
+### Build-system mismatch (resolved 2026-05-11: gnulib dropped)
 
-Rsync's `Makefile.in` is hand-written (autoconf-only, no automake, no
-libtool). gnulib-tool generates `gl/Makefile.am` which expects automake.
+Original problem: rsync's `Makefile.in` is hand-written (autoconf-only,
+no automake, no libtool). gnulib-tool generates `gl/Makefile.am` (4447
+lines) which expects automake, plus dozens of `.in.h` files that need
+m4 substitution before they're usable.
 
-The Phase 2 work has to manually integrate gl/ into the rsync build:
-- Add `AC_CONFIG_MACRO_DIRS([gl/m4])` to `configure.ac`
-- Call `gl_EARLY` after `AC_PROG_CC` and `gl_INIT` later in `configure.ac`
-- Add custom rules to `Makefile.in` to build `gl/libgnu.a` from the file
-  list in `gl/Makefile.am`'s `libgnu_a_SOURCES`
-- Only build/link gl/ when `WIN32_NATIVE` is detected (Linux/BSD/macOS
-  builds should be unaffected)
+**Resolution**: option (d) — drop gnulib from the build entirely.
+Only one source file consumed it (`win32/win_spawn.c::create_pipe_bidi`
+from `gl/spawn-pipe.h`), and that's ~60 LOC of CreateProcess + CreatePipe
+written directly. The other gnulib polyfills that the import pulled in
+(posix_spawn, sigaction, select, ...) were redundant — Win32 native
+APIs cover the same ground without an automake build pipeline.
 
-**Deferred to first Windows session**: invoking `gl_EARLY` and `gl_INIT`
-from configure.ac conditionally. The gnulib m4 macros use `AC_REQUIRE`
-which expands at m4 time, so wrapping them in a `if test x$windows_native
-= xyes` shell conditional doesn't actually make them conditional.
-Pragmatic options to evaluate when we have Windows build feedback:
-(a) call `gl_INIT` unconditionally and handle the AC_LIBOBJ fallout on
-non-Windows by linking gl objects into a no-op archive;
-(b) maintain a small `configure.ac.win` overlay that runs on Windows
-only;
-(c) build `gl/libgnu.a` outside autoconf entirely, with a hand-written
-list of sources from `gl/Makefile.am`'s `libgnu_a_SOURCES`.
-
-Option (c) is simplest if the `*.in.h → *.h` substitutions can be
-pre-generated and committed; gnulib's `gnulib-tool --generate` mode or
-running automake once locally can produce them.
+The `gl/` submodule remains in the tree to preserve history and to leave
+room for a fallback if we ever want polyfills we can't easily write
+inline. It is NOT on the include path during compilation; nothing in
+`gl/` is built or linked.
 
 ## File map (Windows-specific code)
 

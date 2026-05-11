@@ -451,23 +451,29 @@ enum delret {
 #endif
 
 /* these are needed for the uid/gid mapping code */
+#ifndef WIN32_NATIVE
 #include <pwd.h>
 #include <grp.h>
+#endif
 
 #include <stdarg.h>
+#ifndef WIN32_NATIVE
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 #ifdef HAVE_NETDB_H
 #include <netdb.h>
 #endif
+#ifndef WIN32_NATIVE
 #include <syslog.h>
+#endif
 #ifdef HAVE_SYS_FILE_H
 #include <sys/file.h>
 #endif
 
 #ifdef HAVE_DIRENT_H
 # include <dirent.h>
-#else
+#elif !defined(WIN32_NATIVE)
 # define dirent direct
 # ifdef HAVE_SYS_NDIR_H
 #  include <sys/ndir.h>
@@ -478,6 +484,11 @@ enum delret {
 # ifdef HAVE_NDIR_H
 #  include <ndir.h>
 # endif
+#else
+/* On Windows: DIR / opendir / readdir / closedir come from
+ * win32/win_compat.h. We keep the `dirent -> direct' alias so that
+ * ifuncs.h::d_name(struct dirent *) sees a known struct. */
+# define dirent direct
 #endif
 
 #ifdef MAJOR_IN_MKDEV

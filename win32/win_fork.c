@@ -19,11 +19,8 @@
 #include "win32/win_fork.h"
 #include <errno.h>
 #include <process.h>
-#include <sys/wait.h>
-
-#ifndef WNOHANG
-# define WNOHANG 1
-#endif
+/* WNOHANG and the W_EXITCODE / WIFEXITED / WEXITSTATUS macros are
+ * provided by win32/win_compat.h (no <sys/wait.h> on Windows). */
 
 /* ---- RtlCloneUserProcess prototypes (ntdll internal) ---- */
 
@@ -127,6 +124,14 @@ static void return_child_handle(DWORD pid, HANDLE handle)
     /* For WNOHANG that returned 0: put the handle back so future
      * polls can find it. */
     register_child(pid, handle);
+}
+
+/* Public: register a CreateProcess-derived child. Same table as the
+ * clone-based fork; lets win_waitpid wait on the ssh.exe spawned by
+ * win_spawn_remote_shell. */
+void win_register_external_child(DWORD pid, HANDLE h)
+{
+    register_child(pid, h);
 }
 
 /* ---- public API ---- */

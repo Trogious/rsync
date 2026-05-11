@@ -41,4 +41,13 @@ pid_t win_fork(void);
  * (W_EXITCODE: low byte signal, next byte exit code). */
 pid_t win_waitpid(pid_t pid, int *statusp, int options);
 
+/* Register a process HANDLE acquired by CreateProcess (i.e. not from
+ * RtlCloneUserProcess) so that win_waitpid can find it. Used by
+ * win_spawn.c for the ssh.exe child. The HANDLE ownership is
+ * transferred to the fork table. */
+#ifdef WIN32_NATIVE
+#include <windows.h>
+void win_register_external_child(DWORD pid, HANDLE h);
+#endif
+
 #endif /* WIN_FORK_H */

@@ -17,7 +17,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifndef WIN32_NATIVE
 #include <unistd.h>
+#endif
+/* On Windows: read()/write()/close() prototypes come from <io.h> via
+ * win32/win_compat.h (re-declared there to avoid the local io.h clash). */
 
 void * xmalloc (size_t size);
 

@@ -5,6 +5,109 @@ tracked in `NEWS.md` (inherited from upstream).
 
 ## Unreleased
 
+### Windows build brought up to first working `rsync.exe` (2026-05-11)
+- **Outcome**: `scripts/build-windows.ps1` produces a 5.5 MB `rsync.exe`
+  that passes `verify-static.ps1` (no Cygwin / MSYS / vcruntime DLLs;
+  only ws2_32, advapi32, crypt32, user32, kernel32). `--version`,
+  `--help`, `--daemon` rejection, and `rsync://` rejection all work.
+- **Known regression**: local-to-local `rsync -av src/ dst/` hangs.
+  Two `rsync.exe` processes spawn via `win_fork()` (RtlCloneUserProcess)
+  and never make progress. Diagnosis deferred — likely the clone is
+  fragile against modern Windows loader-lock state or our pipe IPC
+  setup mismatches the cloned child's view of the FD table. Tracked as
+  a follow-up; remote-via-ssh path is independent and untested here.
+- **gnulib dropped from the build** (PORTING.md "Build-system
+  mismatch" — resolved by option (d): replace the one consumer of
+  `gl/spawn-pipe.h::create_pipe_bidi` with a ~60 LOC native
+  CreateProcess + CreatePipe in `win32/win_spawn.c`). Avoids the
+  4447-line `gl/Makefile.am`, `.in.h` m4 substitution, and gnulib's
+  automake-only build pipeline. `gl/` submodule remains in the tree
+  but is no longer compiled.
+- **POSIX shim layer** (`win32/win_compat.h`) expanded from ~200 to
+  ~430 lines: `struct passwd` / `struct group` / `struct direct`
+  stubs (Windows has no /etc/passwd); `S_*` mode-bit and `S_IS*`
+  predicate macros; POSIX fcntl constants + `struct flock`;
+  `DIR`/`opendir`/`readdir`/`closedir` typedef backed by
+  FindFirstFile in `win_fs.c`; `gettimeofday` via
+  `GetSystemTimeAsFileTime`; `strcasecmp`/`strncasecmp` →
+  MSVC's `_stricmp`/`_strnicmp`; `kill(pid, 0)` via
+  `OpenProcess + GetExitCodeProcess`; `localtime_r` arg-order
+  adapter; `pipe`/`fsync`/`alarm` shims; syslog no-op stubs;
+  `major`/`minor`/`makedev` macros; `R_OK`/`W_OK`/`F_OK` constants;
+  SIGALRM/SIGCHLD/SIGUSR1 etc. numeric defines; `WIFEXITED`/
+  `WEXITSTATUS` decoders for our 0xFF00-encoded exit status from
+  `win_waitpid`.
+- **Daemon-only symbol stubs** (`win32/stub_daemon.c`): added
+  `module_id`, `read_only`, `module_dir`, `module_dirlen`,
+  `auth_user`, `full_module_path`, `undetermined_hostname`, plus the
+  `lp_*` query functions (`lp_pid_file`, `lp_log_file`,
+  `lp_syslog_facility`, `lp_refuse_options`, `lp_write_only`,
+  `lp_reverse_lookup`, `lp_dont_compress`, `lp_name`,
+  `lp_ignore_nonreadable`, `lp_munge_symlinks`, `lp_numeric_ids`,
+  `lp_use_chroot`), `start_inband_exchange`, `set_env_num`,
+  `reset_daemon_vars`, `set_dparams`, `base64_encode`,
+  `namecvt_call`, `daemon_chmod_modes`. Signatures match `proto.h`
+  exactly. All return harmless "client-mode" values so the linker
+  resolves them but the daemon paths never actually run.
+- **`AH_BOTTOM` injection** (`configure.ac`) makes every translation
+  unit that includes `config.h` automatically pick up
+  `win32/win_compat.h` on Windows. Without this, `lib/snprintf.c` and
+  the popt files (which don't include `rsync.h`) miss the shims.
+- **Autoconf cache pre-seeding** (`configure.ac`): rsync's configure
+  hard-codes `<sys/socket.h>` / `<netdb.h>` in many type/feature
+  probes, which always fail on MSVC. We pre-seed
+  `ac_cv_type_socklen_t`, `ac_cv_type_struct_addrinfo`,
+  `ac_cv_type_struct_sockaddr_storage`, `ac_cv_func_getaddrinfo`,
+  `ac_cv_func_inet_ntop`/`inet_pton`, `ac_cv_func_sigaction`/
+  `sigprocmask`, `ac_cv_func_memmove`/`strpbrk`/`getcwd`,
+  `ac_cv_func_waitpid`/`fork`, `rsync_cv_HAVE_GETADDR_DEFINES`,
+  `rsync_cv_HAVE_GETTIMEOFDAY_TZ`, etc. so the m4 probes
+  short-circuit to the right answer instead of failing the test
+  compile.
+- **POSIX-header gating** in upstream files (one-line
+  `#ifndef WIN32_NATIVE` around each unconditional include):
+  `rsync.h` (pwd.h, grp.h, netinet/in.h, arpa/inet.h, syslog.h,
+  dirent/direct alias), `socket.c` (netinet/tcp.h), `popt/system.h`
+  (unistd.h), `popt/popt.c` (unistd.h), `popt/poptconfig.c`
+  (unistd.h), `popt/popthelp.c` (sys/ioctl.h via POPT_USE_TIOCGWINSZ).
+- **`win32/win_fs.c`**: added `win_opendir`/`win_readdir`/
+  `win_closedir` (FindFirstFile/FindNextFile-backed) and
+  `win_gettimeofday` (FILETIME → timeval, 1601→1970 epoch offset).
+- **`win32/win_fork.c`**: added `win_register_external_child(pid, h)`
+  so non-cloned CreateProcess children (the `ssh.exe` from
+  `win_spawn_remote_shell`) share the same pid→HANDLE waitpid table
+  as cloned children. Removed `<sys/wait.h>` include (W*-decoder
+  macros now in win_compat.h).
+- **`win32/win_spawn.c`**: rewritten without gnulib. Builds an
+  MSVC-quoted command line, creates two anonymous pipes, sets the
+  parent ends non-inheritable, `CreateProcessA(NULL, cmdline, ...)`,
+  hands the resulting HANDLE to `win_register_external_child`,
+  wraps the pipe ends in CRT fds via `_open_osfhandle`. ~150 LOC,
+  zero gnulib.
+- **`scripts/build-windows.ps1`**: invokes `aclocal -I m4` +
+  `autoconf -o configure.sh` + `autoheader` directly instead of
+  `autoreconf -fiv` (the latter generates `configure` not
+  `configure.sh`, mismatching rsync's hand-written Makefile.in
+  reconfigure rule). Touches `configure.sh.old`/`config.h.in.old`
+  up-front so the first build doesn't trip the "configure.sh has
+  CHANGED — re-run make reconfigure" guard. Uses `bash -c` instead of
+  `bash -lc` so `/etc/profile` doesn't reset the MSVC PATH inherited
+  from `vcvars64.bat`. Sets `MSYS2_PATH_TYPE=inherit`, propagates
+  `INCLUDE` / `LIB` env vars to bash, and uses `$repoMsys` directly
+  for the build-aux/compile path so bash doesn't see literal
+  `$PWD`. Updated lib names to match vcpkg's
+  x64-windows-static triplet (`zstd.lib` not `zstd_static.lib`;
+  zlib comes from rsync's bundled `zlib/` not vcpkg, so no `zs.lib`).
+- **`scripts/smoke-test.ps1`**: corrected expected `--daemon` exit
+  code from 14 (PLAN.md guess) to 4 (`RERR_UNSUPPORTED` per
+  `errcode.h`).
+- **`build-aux/compile` and `build-aux/ar-lib`**: copied from
+  MSYS2's automake-1.17 package. Required because rsync isn't an
+  automake project, so `autoreconf -fiv --install` doesn't drop them
+  in. configure.sh routes `cl.exe` invocations through these wrappers
+  to translate unix-style `-c -o file.o` into MSVC-style `/c
+  /Fofile.o`. Tracked in-tree so CI doesn't need automake.
+
 ### Phase 0 — Fork & directory skeleton
 - Forked upstream `RsyncProject/rsync` at tag `v3.4.2`.
 - Created `win32-port` work branch and `upstream-tracking` mirror branch

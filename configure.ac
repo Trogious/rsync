@@ -80,9 +80,75 @@ AC_PREPROC_IFELSE(
     [windows_native=no
      AC_MSG_RESULT([no])])
 AC_SUBST([WIN32_NATIVE], [$windows_native])
+
+# Some compilation units (e.g. lib/snprintf.c) include config.h but not
+# rsync.h, so they wouldn't otherwise see our Windows compat header.
+# AH_BOTTOM injects this at the bottom of config.h. Inert on non-Windows.
+AH_BOTTOM([
+#ifdef WIN32_NATIVE
+# include "win32/win_compat.h"
+#endif
+])
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
     WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/stub_daemon.o"
+
+    # Pre-seed autoconf cache for checks that hard-code POSIX-only headers
+    # (sys/socket.h, sys/types.h, etc.) in their test programs. On Windows
+    # the actual symbols come from <winsock2.h> / <windows.h>; win_compat.h
+    # provides typedefs for uid_t/gid_t/pid_t/mode_t/ssize_t.
+    ac_cv_type_socklen_t=yes
+    ac_cv_type_pid_t=yes
+    ac_cv_type_uid_t=yes
+    ac_cv_type_gid_t=yes
+    ac_cv_type_mode_t=yes
+    ac_cv_type_id_t=yes
+    ac_cv_type_off64_t=no
+    # AC_HAVE_TYPE (m4/have_type.m4) uses ac_cv_type_<sanitized>=yes
+    # to short-circuit. Force struct addrinfo / sockaddr_storage so
+    # lib/addrinfo.h's fallback definitions stay #ifdef'd out (they would
+    # collide with winsock2.h's declarations).
+    ac_cv_type_struct_addrinfo=yes
+    ac_cv_type_struct_sockaddr_storage=yes
+    ac_cv_func_connect=yes
+    ac_cv_func_inet_ntop=yes
+    ac_cv_func_inet_pton=yes
+    ac_cv_func_gethostname=yes
+    ac_cv_func_getaddrinfo=yes
+    ac_cv_func_strdup=yes
+    ac_cv_func_strerror=yes
+    ac_cv_func_snprintf=yes
+    ac_cv_func_vsnprintf=yes
+    # win32/win_compat.h redirects fork/waitpid via macros; pretend libc
+    # has them so lib/compat.c doesn't try to redefine them.
+    ac_cv_func_fork=yes
+    ac_cv_func_waitpid=yes
+    # Standard string/mem functions that MSVC ships in <string.h>.
+    ac_cv_func_memmove=yes
+    ac_cv_func_strpbrk=yes
+    ac_cv_func_strchr=yes
+    ac_cv_func_memchr=yes
+    ac_cv_func_strstr=yes
+    ac_cv_func_getcwd=yes
+    # AC_REPLACE_FUNCS adds <name>.obj to LIBOBJS unless cache says yes.
+    # On Windows we provide getpass via a stub in win_compat.h; getaddrinfo
+    # comes from <ws2tcpip.h>.
+    ac_cv_func_getpass=yes
+    # Block AC_LIBOBJ([getaddrinfo]) by also setting the macro-driven
+    # cache var rsync uses to gate it.
+    rsync_cv_HAVE_GETADDR_DEFINES=yes
+    # win32/win_compat.h's gettimeofday() macro is always 2-arg.
+    rsync_cv_HAVE_GETTIMEOFDAY_TZ=yes
+    # win_compat.h fakes sigaction/sigprocmask via macros that funnel
+    # back to signal(); pretend rsync has them so the SIGACTMASK macro
+    # gets the working variant (line 129 of main.c) instead of being
+    # left undefined and ending up as an unresolved external.
+    ac_cv_func_sigaction=yes
+    ac_cv_func_sigprocmask=yes
+
+    # rsync's largefile / off_t detection assumes POSIX <sys/stat.h>; the
+    # Windows CRT uses 32-bit off_t. We supply HAVE_OFF64_T elsewhere.
+    ac_cv_sizeof_off_t=4
 else
     WIN32_OBJS=""
 fi

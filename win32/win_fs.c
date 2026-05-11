@@ -227,4 +227,77 @@ int win_utimens(const char *path, const struct timespec times[2])
     return 0;
 }
 
+/* Directory iteration. rsync uses opendir/readdir/closedir for recursive
+ * traversal. We back it with FindFirstFile/FindNextFile. The directory
+ * pattern is "<path>\\*" (FindFirst returns "." then ".." then entries). */
+DIR *win_opendir(const char *path)
+{
+    if (!path) { errno = EINVAL; return NULL; }
+    size_t len = strlen(path);
+    /* Pattern buffer: path + "\\*" + NUL */
+    char pattern[MAX_PATH * 4];
+    if (len + 3 > sizeof(pattern)) { errno = ENAMETOOLONG; return NULL; }
+    memcpy(pattern, path, len);
+    /* Ensure trailing separator */
+    char last = len ? path[len - 1] : '\0';
+    size_t pos = len;
+    if (last != '\\' && last != '/' && last != ':' && len != 0)
+        pattern[pos++] = '\\';
+    pattern[pos++] = '*';
+    pattern[pos]   = '\0';
+
+    DIR *d = (DIR *)calloc(1, sizeof(*d));
+    if (!d) { errno = ENOMEM; return NULL; }
+    d->handle = FindFirstFileA(pattern, &d->pending);
+    if (d->handle == INVALID_HANDLE_VALUE) {
+        DWORD e = GetLastError();
+        free(d);
+        errno = (e == ERROR_PATH_NOT_FOUND || e == ERROR_FILE_NOT_FOUND) ? ENOENT : EIO;
+        return NULL;
+    }
+    d->have_pending = 1;
+    return d;
+}
+
+struct direct *win_readdir(DIR *d)
+{
+    if (!d) { errno = EINVAL; return NULL; }
+    if (!d->have_pending) {
+        if (!FindNextFileA(d->handle, &d->pending)) {
+            /* End of dir or error — POSIX readdir returns NULL with errno
+             * unchanged on end-of-dir. */
+            return NULL;
+        }
+    }
+    d->have_pending = 0;
+    size_t n = strnlen(d->pending.cFileName, sizeof(d->entry.d_name) - 1);
+    memcpy(d->entry.d_name, d->pending.cFileName, n);
+    d->entry.d_name[n] = '\0';
+    return &d->entry;
+}
+
+int win_closedir(DIR *d)
+{
+    if (!d) { errno = EINVAL; return -1; }
+    if (d->handle != INVALID_HANDLE_VALUE)
+        FindClose(d->handle);
+    free(d);
+    return 0;
+}
+
+/* gettimeofday — convert FILETIME (100ns ticks since 1601) into
+ * struct timeval (s + us since 1970). */
+int win_gettimeofday(struct timeval *tv, struct timezone *tz)
+{
+    (void)tz;
+    if (!tv) { errno = EINVAL; return -1; }
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t ticks = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    ticks -= 116444736000000000ULL;        /* 1601 -> 1970 (in 100ns) */
+    tv->tv_sec  = (long)(ticks / 10000000ULL);
+    tv->tv_usec = (long)((ticks % 10000000ULL) / 10);
+    return 0;
+}
+
 #endif /* WIN32_NATIVE */
