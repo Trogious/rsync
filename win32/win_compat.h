@@ -70,15 +70,14 @@ typedef int gid_t;
 # define S_ISFIFO(m) (((m) & S_IFMT) == _S_IFIFO)
 #endif
 
-/* fork() is deliberately left undeclared. Any upstream call site that
- * still references fork() under WIN32_NATIVE must be replaced with
- * win_spawn_remote_shell() or win_reexec_self_as() — we want a compile
- * error to flag any missed site, not a silent link failure. */
+/* fork() and waitpid() are redirected to our NT-based implementations.
+ * See win32/win_fork.c. */
+#define fork()                       win_fork()
+#define waitpid(p, s, o)             win_waitpid((p), (s), (o))
 
 /* Forward declarations from our win32/ replacements. */
 #include "win32/win_spawn.h"
-#include "win32/win_reexec.h"
-#include "win32/win_child_init.h"
+#include "win32/win_fork.h"
 #include "win32/win_paths.h"
 #include "win32/win_fs.h"
 #include "win32/win_ssh.h"

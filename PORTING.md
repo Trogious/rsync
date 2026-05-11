@@ -83,11 +83,8 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 | `rsync.h` | Inserted `#ifdef WIN32_NATIVE` / `#include "win32/win_compat.h"` block immediately after `#include "config.h"`. | Phase 2: pulls in Windows API headers, POSIX type stubs, and `win32/win_*.h` declarations. Block is inert when `WIN32_NATIVE` is undefined. |
 | `Makefile.in` | Added `WIN32_OBJS = @WIN32_OBJS@` line and appended `$(WIN32_OBJS)` to `OBJS`. | Phase 2: links the `win32/*.o` stubs into `rsync.exe`. Empty on Linux/macOS. |
 | `configure.ac` | Inside the `WIN32_NATIVE` shell block, set `WIN32_OBJS` to the list of `win32/*.o` files and `AC_SUBST` it. | Phase 2: feeds the object list to `Makefile.in` via `@WIN32_OBJS@`. |
-| `pipe.c` | `piped_child()`: added `#ifdef WIN32_NATIVE` branch that calls `win_spawn_remote_shell()` (via gnulib `create_pipe_bidi`); the rest of the function body is the unchanged Unix fork/exec path under `#else`. | Phase 3 Site 1: replaces fork+exec(ssh) for remote-shell transport. |
-| `pipe.c` | `local_child()`: added `#ifdef WIN32_NATIVE` branch that calls `win_reexec_self_as(WIN_ROLE_LOCAL_CHILD, ...)`; `#else` keeps the original Unix fork+pipe+child_main path. | Phase 3 Site 2: replaces fork+in-process-dispatch for local-to-local rsync. |
-| `main.c` | `main()`: added `#ifdef WIN32_NATIVE` block at the top that calls `win_child_init(argc, argv)`; if it returns `>= 0` the process exits with that code (we were a re-exec'd child). | Phase 3: child-side hook for the re-exec machinery in `pipe.c::local_child` and (eventually) `do_recv`. |
-| `main.c` | `do_recv()`: added `#ifdef WIN32_NATIVE` branch that prints an `RERR_UNSUPPORTED` error before the `do_fork()` call. Documented as a known limitation: downloads (FROM remote TO Windows) fail; uploads work. | Phase 3 Site 3 [DECIDE]: receiver/generator split needs `first_flist` + option-globals serialization (or thread-based redesign); deferred. |
-| `main.c` | `shell_exec()`: added `#ifdef WIN32_NATIVE` branch returning `system(cmd)`; `#else` keeps the `fork()+execlp($RSYNC_SHELL)` path. | Phase 3 Site 4: no `fork()` on Windows; `system()` honors PATH-based shell resolution via cmd.exe. |
+| `pipe.c` | `piped_child()`: added `#ifdef WIN32_NATIVE` branch that calls `win_spawn_remote_shell()` (via gnulib `create_pipe_bidi`); the rest of the function body is the unchanged Unix fork/exec path under `#else`. | Phase 3 Site 1: replaces fork+exec(ssh) for remote-shell transport. We use direct CreateProcess on ssh.exe rather than fork+exec because Windows has no real `exec` (the MSVC `_execvp` actually spawns a new process and exits, leaving an orphan). |
+| `main.c` | `shell_exec()`: added `#ifdef WIN32_NATIVE` branch returning `system(cmd)`; `#else` keeps the `fork()+execlp($RSYNC_SHELL)` path. | Phase 3 Site 4: same reasoning — `system()` is the cleanest "launch external command" primitive. |
 | `options.c` | `check_for_hostspec()`: added `#ifdef WIN32_NATIVE` block at the top that returns `NULL` (= local path) when the input is a drive-letter path (`C:`, `C:\..`, `C:/..`) or a UNC path (`\\server\share`, `\\?\..`, `\\.\..`). | Phase 4 Task 4.1: fixes the cwRsync colon-parsing bug (`C:\Users` parsed as host "C"). |
 | `rsync.h` | Added `#ifdef WIN32_NATIVE` block that unconditionally defines `SUPPORT_LINKS`, `SUPPORT_HARD_LINKS`, and overrides `do_readlink(...)` to `win_readlink(...)`. The pre-existing macros remain under `#else`. | Phase 4: gnulib's `readlink` polyfill is a stub on Windows, so we route through our reparse-point reader. Hard links are always available on NTFS via `CreateHardLinkA`. |
 | `syscall.c` | `do_symlink()`: added `#ifdef WIN32_NATIVE` branch calling `win_symlink()`. `do_link()`: extended the gate to include `WIN32_NATIVE` and added a branch calling `win_link()`. `do_chmod()`: extended the gate; wraps Windows path in `#ifdef WIN32_NATIVE` short-circuit at top of function. | Phase 4 Tasks 4.4–4.5: native symlink, hardlink, and mode-bit handling via `CreateSymbolicLinkA`, `CreateHardLinkA`, `SetFileAttributesA`. |
@@ -113,42 +110,59 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 | 6 | `socket.c::start_accept_loop()` | Daemon-only; excised |
 | 7 | `clientserver.c::become_daemon()` | Daemon-only; excised |
 
-## do_recv state preservation (open [DECIDE])
+## fork() and waitpid() on Windows
 
-`main.c::do_recv()` forks to split the local side into a generator (parent)
-and receiver (child) when downloading. After the fork on Unix, the child
-keeps full memory access to:
+Sites 2 (`pipe.c::local_child`) and 3 (`main.c::do_recv`) need a true
+`fork()` — both processes continue running upstream rsync code with
+identical in-memory state (parsed option globals, `first_flist`,
+allocated buffers). Re-exec can't reproduce that; threads can't
+reproduce it without rewriting many upstream globals as thread-local.
 
-- All option-parsed globals: `copy_links`, `tmpdir`, `backup_dir`,
-  `preserve_hard_links`, `inc_recurse`, `chmod_modes`, `am_server`, dozens
-  more.
-- `first_flist` — the linked list of file metadata received from the
-  remote sender, before the fork.
+Solution: implement POSIX `fork()` via `RtlCloneUserProcess`, the
+ntdll internal API used by Cygwin, MSYS2, and mitchcapper's tar port.
+`win_compat.h` redirects calls with two function-like macros:
 
-A CreateProcess-based re-exec does NOT carry this state. The Phase 3
-stub currently errors out with `RERR_UNSUPPORTED`. Three design options
-to evaluate when iterating on Windows:
+```c
+#define fork()             win_fork()
+#define waitpid(p, s, o)   win_waitpid((p), (s), (o))
+```
 
-1. **Serialize state.** Extend the state file written by `win_reexec.c`
-   to include each option global and a serialized form of `first_flist`.
-   Pros: matches upstream's process-isolation model. Cons: large surface,
-   ongoing maintenance burden as new option globals are added upstream.
+This means **no edits to `pipe.c::local_child`, `main.c::do_recv`,
+`util1.c::do_fork`, or anywhere else fork/waitpid is called.** The
+existing upstream code path runs as-is on Windows.
 
-2. **Use threads.** On Windows, run the receiver in a worker thread of
-   the same process. Globals are shared; no serialization. Pros:
-   straightforward. Cons: upstream code uses `exit()` / `_exit()` in
-   places where a thread would need to bail differently; signal handling
-   differs; shared `io_*` state needs locks.
+### win_fork implementation summary
 
-3. **Windows fork-clone API.** Use `RtlCloneUserProcess` /
-   `NtCreateUserProcess` (mitchcapper's approach) to literally clone the
-   process. Pros: preserves state for free. Cons: undocumented API,
-   fragile across Windows versions, blocked by some EDR products.
+`win32/win_fork.c`:
 
-Recommended path: try (2) first — bind a thread to "the receiver role"
-and use a `Sleep`-free message channel between generator and receiver
-via in-memory queues instead of pipes. Fallback to (1) if upstream's
-`exit()`/`io_flush_msg` pattern can't be threaded cleanly.
+- Resolves `RtlCloneUserProcess` from `ntdll.dll` lazily (single
+  `GetProcAddress` per process, cached).
+- Calls with `RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES`.
+- Child path: function returns `STATUS_PROCESS_CLONED` (0x129); we
+  return 0 from `win_fork()`.
+- Parent path: returns `STATUS_SUCCESS`, gets process info; we
+  return the child's pid and stash the process HANDLE in a small
+  pid→HANDLE table (mutex-protected, capacity 64).
+
+`win_waitpid`: looks up the HANDLE in the table (or falls back to
+`OpenProcess(pid)`), calls `WaitForSingleObject` with `INFINITE` or
+zero-timeout (WNOHANG), reads exit code via `GetExitCodeProcess`,
+encodes in POSIX `W_EXITCODE` layout.
+
+### Known limitations
+
+- `RtlCloneUserProcess` is undocumented. It has been stable since
+  Windows XP and is exercised by Cygwin on every fork, so risk of
+  breaking changes is low — but not zero.
+- Some EDR products (CrowdStrike, SentinelOne in aggressive modes)
+  block the clone. There's no graceful fallback in this build; the
+  user sees `errno=EAGAIN` and rsync exits.
+- We don't replicate the Windows signal-handler table across the
+  clone. rsync's signal use is light (SIGINT for Ctrl-C handling),
+  and the CRT installs SIGINT via SetConsoleCtrlHandler which
+  inherits across CreateProcess descendants. Untested but should work.
+- We don't support `waitpid(-1, ...)` for any-child wait. Easy to
+  add if upstream uses it.
 
 ## Conventions
 

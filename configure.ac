@@ -82,7 +82,7 @@ AC_PREPROC_IFELSE(
 AC_SUBST([WIN32_NATIVE], [$windows_native])
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
-    WIN32_OBJS="win32/win_spawn.o win32/win_reexec.o win32/win_child_init.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/stub_daemon.o"
+    WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/stub_daemon.o"
 else
     WIN32_OBJS=""
 fi

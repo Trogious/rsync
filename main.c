@@ -1043,25 +1043,10 @@ static int do_recv(int f_in, int f_out, char *local_name)
 
 	io_flush(FULL_FLUSH);
 
-#ifdef WIN32_NATIVE
-	/* TODO(win-port): the receiver/generator split requires preserving
-	 * in-memory state across the fork (first_flist, option globals).
-	 * See PORTING.md "do_recv state preservation". Until that's
-	 * implemented, downloads (rsync FROM remote TO Windows) fail here.
-	 * Uploads (rsync FROM Windows TO remote) do not hit this path. */
-	rprintf(FERROR,
-		"rsync: receive-side fork is not yet implemented on Windows.\n"
-		"       Downloads (FROM remote TO this Windows host) are not\n"
-		"       supported in this build; uploads work.\n"
-		"       See PORTING.md \"do_recv state preservation\".\n");
-	exit_cleanup(RERR_UNSUPPORTED);
-	pid = -1;  /* unreachable; quiet the unused-variable warning */
-#else
 	if ((pid = do_fork()) == -1) {
 		rsyserr(FERROR, errno, "fork failed in do_recv");
 		exit_cleanup(RERR_IPC);
 	}
-#endif
 
 	if (pid == 0) {
 		am_receiver = 1;
@@ -1739,16 +1724,6 @@ static void unset_env_var(const char *var)
 int main(int argc,char *argv[])
 {
 	int ret;
-
-#ifdef WIN32_NATIVE
-	/* If we were spawned by win_reexec_self_as as a child role,
-	 * dispatch immediately and exit. Returns -1 if not a child. */
-	{
-		int win_child_rc = win_child_init(argc, argv);
-		if (win_child_rc >= 0)
-			return win_child_rc;
-	}
-#endif
 
 	raw_argc = argc;
 	raw_argv = argv;

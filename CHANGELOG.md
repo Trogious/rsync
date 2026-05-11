@@ -16,6 +16,32 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 3 revision — fork-clone replaces re-exec
+- `win32/win_fork.{c,h}`: implements POSIX `fork()` on Windows via
+  ntdll's `RtlCloneUserProcess` (the Cygwin / MSYS2 / mitchcapper-tar
+  approach). Includes `win_waitpid` since the MSVC CRT's `_cwait`
+  doesn't know about cloned children.
+- `win32/win_compat.h`: `#define fork() win_fork()` and
+  `#define waitpid(p,s,o) win_waitpid(...)`. All upstream rsync code
+  that calls `fork()` / `waitpid()` (util1.c::do_fork, pipe.c
+  ::local_child, main.c::do_recv, socket.c::sock_exec, etc.) gets
+  the macro substitution transparently.
+- Reverted Phase 3's earlier re-exec branches:
+  - `pipe.c::local_child` is back to its upstream form (just `fork()`).
+  - `main.c::do_recv` is back to its upstream form (just `do_fork()`).
+  - `main.c::main` no longer has the `win_child_init` hook.
+- Removed obsolete files: `win32/win_reexec.{c,h}`,
+  `win32/win_child_init.{c,h}`.
+- `configure.ac`: `WIN32_OBJS` updated to include `win_fork.o`,
+  exclude `win_reexec.o` / `win_child_init.o`.
+- **Effect: downloads (rsync FROM remote TO Windows) and
+  local-to-local syncs on Windows now use the same code path as
+  Linux**, no longer broken. `piped_child` (ssh spawn) still uses
+  gnulib's `create_pipe_bidi` because that's a non-clone code path.
+- `shell_exec` still uses `system()` on Windows — `fork()+execlp()`
+  also works but `system()` is simpler and equivalent.
+- Linux full rebuild verified.
+
 ### Phase 7 — CI workflows
 - `.github/workflows/build.yml`: builds rsync.exe on `windows-latest`
   GitHub runner (MSVC + MSYS2 shell + vcpkg x64-windows-static),
