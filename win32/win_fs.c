@@ -35,8 +35,43 @@ int win_chmod(const char *path, mode_t mode)
     return 0;
 }
 
+/* Resolve `target` (the string the symlink points to) into an absolute
+ * filesystem path we can pass to CopyFileA. If target is relative,
+ * it's resolved against the directory containing linkpath — matching
+ * POSIX symlink semantics. Returns 0 on success, -1 on overflow. */
+static int resolve_link_target(const char *target, const char *linkpath,
+                               char *out, size_t out_size)
+{
+    int target_abs = (target[0] == '\\' || target[0] == '/'
+                      || (target[1] == ':' && (target[2] == '\\' || target[2] == '/')));
+    if (target_abs) {
+        if ((size_t)snprintf(out, out_size, "%s", target) >= out_size)
+            return -1;
+        return 0;
+    }
+
+    /* Relative: drop linkpath's last component, append target. */
+    size_t len = strlen(linkpath);
+    if (len >= out_size) return -1;
+    memcpy(out, linkpath, len + 1);
+    char *slash = strrchr(out, '\\');
+    char *fslash = strrchr(out, '/');
+    if (fslash > slash) slash = fslash;
+    if (slash) {
+        slash[1] = '\0';
+    } else {
+        out[0] = '\0';
+    }
+    size_t pos = strlen(out);
+    if ((size_t)snprintf(out + pos, out_size - pos, "%s", target) >= out_size - pos)
+        return -1;
+    return 0;
+}
+
 int win_symlink(const char *target, const char *linkpath)
 {
+    static int permission_warning_emitted = 0;
+
     if (!target || !linkpath) {
         errno = EINVAL;
         return -1;
@@ -46,25 +81,58 @@ int win_symlink(const char *target, const char *linkpath)
      * the flag, CreateSymbolicLinkA returns 0 and GetLastError gives
      * ERROR_INVALID_PARAMETER on older builds.
      *
-     * SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1 — set if target is a directory
-     * (we don't actually stat it; default to file. rsync's -a flag tells
-     * us via separate calls for dirs.)
-     *
      * TODO(win-port): detect target type via GetFileAttributesA(target)
-     * and set the DIRECTORY flag accordingly.
+     * and set SYMBOLIC_LINK_FLAG_DIRECTORY (0x1) for directory targets.
      */
     DWORD flags = 0x2;   /* unprivileged-create */
-    if (!CreateSymbolicLinkA(linkpath, target, flags)) {
-        DWORD err = GetLastError();
-        if (err == ERROR_PRIVILEGE_NOT_HELD || err == ERROR_ACCESS_DENIED)
-            errno = EACCES;
-        else if (err == ERROR_ALREADY_EXISTS)
-            errno = EEXIST;
-        else
-            errno = EIO;
+    if (CreateSymbolicLinkA(linkpath, target, flags))
+        return 0;
+
+    DWORD err = GetLastError();
+    if (err == ERROR_ALREADY_EXISTS) {
+        errno = EEXIST;
         return -1;
     }
-    return 0;
+
+    /* Permission failure path. Default: warn once, fall back to copying
+     * the target's contents into linkpath (so the file at least
+     * transfers). Override with RSYNC_STRICT_SYMLINKS=1. */
+    if (err == ERROR_PRIVILEGE_NOT_HELD || err == ERROR_ACCESS_DENIED) {
+        const char *strict = getenv("RSYNC_STRICT_SYMLINKS");
+        if (strict && *strict && *strict != '0') {
+            errno = EACCES;
+            return -1;
+        }
+        if (!permission_warning_emitted) {
+            permission_warning_emitted = 1;
+            rprintf(FWARNING,
+                "rsync: cannot create symlinks without Developer Mode or admin.\n"
+                "       Falling back to copying target content for the symlinks\n"
+                "       we encounter. Set RSYNC_STRICT_SYMLINKS=1 to make this\n"
+                "       failure fatal instead.\n");
+        }
+
+        char resolved[MAX_PATH * 4];
+        if (resolve_link_target(target, linkpath, resolved, sizeof(resolved)) < 0) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        /* CopyFileA on a directory fails; that's the right behavior for
+         * us (we can't fold a directory into a file). For dangling
+         * symlinks, CopyFileA returns ERROR_FILE_NOT_FOUND. */
+        if (CopyFileA(resolved, linkpath, FALSE))
+            return 0;
+
+        DWORD copy_err = GetLastError();
+        if (copy_err == ERROR_FILE_NOT_FOUND) errno = ENOENT;
+        else if (copy_err == ERROR_ACCESS_DENIED) errno = EACCES;
+        else errno = EIO;
+        return -1;
+    }
+
+    /* Some other CreateSymbolicLink error. */
+    errno = EIO;
+    return -1;
 }
 
 ssize_t win_readlink(const char *path, char *buf, size_t bufsize)

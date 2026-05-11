@@ -16,6 +16,19 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Post-revision cleanup
+- `win32/win_fs.c::win_symlink`: implemented PLAN.md's default
+  symlink policy **C** (warn + fallback) instead of policy B
+  (hard error). On `ERROR_PRIVILEGE_NOT_HELD` or
+  `ERROR_ACCESS_DENIED`, emit a one-shot `FWARNING` message and
+  fall back to `CopyFileA(target, linkpath)` (with relative-target
+  resolution against the link's directory). Override with
+  `RSYNC_STRICT_SYMLINKS=1` to force a hard error instead.
+  Matches the wording already in `KNOWN-ISSUES.md`.
+- `win32/README.md` added — file map for the win32/ directory plus
+  conventions for adding new Windows-only sources. Closes a gap
+  versus PLAN.md section 5.
+
 ### Phase 3 revision — fork-clone replaces re-exec
 - `win32/win_fork.{c,h}`: implements POSIX `fork()` on Windows via
   ntdll's `RtlCloneUserProcess` (the Cygwin / MSYS2 / mitchcapper-tar
