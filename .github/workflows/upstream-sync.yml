@@ -1,0 +1,44 @@
+name: upstream-sync
+
+# Weekly check for upstream rsync updates. Opens a PR if upstream has
+# moved past our tracked tag. The PR base is `win32-port` (our work
+# branch); a human reviews the merge for #ifdef WIN32_NATIVE conflicts.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/RsyncProject/rsync.git
+          git fetch upstream --tags
+
+      - name: Mirror upstream master to the `main` branch
+        run: |
+          git checkout -B main upstream/master
+          git push origin main --force-with-lease
+
+      - name: Open PR if upstream has a newer tag than upstream-tracking
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: upstream-update
+          title: 'Sync with upstream rsync'
+          body: |
+            Automated weekly upstream sync.
+
+            Review the merge for any conflicts inside `#ifdef WIN32_NATIVE`
+            blocks. See `PORTING.md` for the per-file map of our changes.
+          base: win32-port

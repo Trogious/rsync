@@ -16,6 +16,22 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 7 — CI workflows
+- `.github/workflows/build.yml`: builds rsync.exe on `windows-latest`
+  GitHub runner (MSVC + MSYS2 shell + vcpkg x64-windows-static),
+  verifies static linkage with `dumpbin`, runs smoke tests, packages
+  a `.7z` artifact, publishes a GitHub Release on `v*` tags.
+- `.github/workflows/upstream-sync.yml`: weekly cron that mirrors
+  upstream `RsyncProject/rsync` master to our `main` branch and
+  opens a PR against `win32-port` if upstream advanced.
+- `scripts/verify-static.ps1`: dumpbin-based allowlist check against
+  forbidden runtimes (cyg*, msys-*, vcruntime*, etc.).
+- `scripts/smoke-test.ps1`: `--version`, `--help`, local copy
+  round-trip, daemon/rsync:// rejection checks.
+- DEFERRED: actually running the workflow on GitHub Actions (needs
+  the branch pushed to origin); CVE-watch workflow (mentioned in
+  PLAN.md directory layout but no spec details yet).
+
 ### Phase 6 — Daemon excision (Linux portion)
 - `options.c::parse_arguments` case `OPT_DAEMON`: on Windows, error +
   exit with `RERR_UNSUPPORTED`. Rejects `--daemon`, `--config`,
