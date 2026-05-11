@@ -1227,14 +1227,27 @@ extern char *sys_errlist[];
 extern int errno;
 #endif
 
+#ifdef WIN32_NATIVE
+/* On Windows, gnulib's readlink polyfill is a stub. Use our
+ * Windows-native implementation that walks reparse points. We force
+ * SUPPORT_LINKS so the calling code is built. */
+#define SUPPORT_LINKS 1
+#define do_readlink(path, buf, bufsiz) win_readlink(path, buf, bufsiz)
+#else
 #ifdef HAVE_READLINK
 #define SUPPORT_LINKS 1
 #if !defined NO_SYMLINK_XATTRS && !defined NO_SYMLINK_USER_XATTRS
 #define do_readlink(path, buf, bufsiz) readlink(path, buf, bufsiz)
 #endif
 #endif
+#endif
+#ifdef WIN32_NATIVE
+/* CreateHardLinkA is available on NTFS volumes — always allow. */
+#define SUPPORT_HARD_LINKS 1
+#else
 #ifdef HAVE_LINK
 #define SUPPORT_HARD_LINKS 1
+#endif
 #endif
 
 #ifdef HAVE_SIGACTION

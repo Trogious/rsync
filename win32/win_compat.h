@@ -24,12 +24,22 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-/* MSVC's CRT does not define pid_t. gnulib's sys_types.in.h does, but
- * we typedef here too in case this header is consumed before gnulib's
- * generated headers are on the include path. */
+/* MSVC's CRT does not define pid_t, mode_t, or ssize_t. gnulib's
+ * generated sys_types.h does, but we typedef here too in case this
+ * header is consumed before gnulib's generated headers are on the
+ * include path. */
 #ifndef _PID_T_DEFINED
 typedef int pid_t;
 # define _PID_T_DEFINED
+#endif
+#ifndef _MODE_T_DEFINED
+typedef unsigned short mode_t;
+# define _MODE_T_DEFINED
+#endif
+#ifndef _SSIZE_T_DEFINED
+# include <basetsd.h>
+typedef SSIZE_T ssize_t;
+# define _SSIZE_T_DEFINED
 #endif
 
 /* Windows has no POSIX uid/gid concept. Treat everyone as uid 0. */

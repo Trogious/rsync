@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<assembly xmlns='urn:schemas-microsoft-com:asm.v1' manifestVersion='1.0'>
+  <application xmlns='urn:schemas-microsoft-com:asm.v3'>
+    <windowsSettings>
+      <!-- Enable >MAX_PATH (260 char) path handling. Requires
+           HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1
+           on the target system OR Windows 10 1607+. -->
+      <longPathAware xmlns='http://schemas.microsoft.com/SMI/2016/WindowsSettings'>true</longPathAware>
+      <!-- Use UTF-8 for narrow-string Windows APIs (CreateFileA etc.). -->
+      <activeCodePage xmlns='http://schemas.microsoft.com/SMI/2019/WindowsSettings'>UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+  <!-- Trust info: invoker (no admin elevation needed) -->
+  <trustInfo xmlns='urn:schemas-microsoft-com:asm.v2'>
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level='asInvoker' uiAccess='false'/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

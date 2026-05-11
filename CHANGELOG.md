@@ -16,6 +16,30 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 4 — Filesystem & path handling (Linux portion)
+- `options.c::check_for_hostspec`: Windows branch returns NULL (local
+  path) for drive-letter (`C:\..`, `C:/..`) and UNC (`\\..`) paths.
+  Fixes the cwRsync colon-parsing bug.
+- `rsync.h`: on Windows, unconditionally define `SUPPORT_LINKS` and
+  `SUPPORT_HARD_LINKS`; override `do_readlink` macro to call
+  `win_readlink` (gnulib's readlink is a stub on Windows).
+- `syscall.c::do_symlink`, `do_link`, `do_chmod`: Windows branches
+  call `win_symlink`/`win_link`/`win_chmod`. `do_link` gate extended
+  to include `WIN32_NATIVE`.
+- `win32/win_paths.c`: implemented `win_long_path_prefix` (resolves
+  to absolute, adds `\\?\` or `\\?\UNC\` prefix).
+- `win32/win_fs.c`: real implementations of `win_chmod` (readonly
+  attribute), `win_symlink` (CreateSymbolicLinkA with unprivileged
+  flag), `win_readlink` (GetFinalPathNameByHandle on the symlink),
+  `win_link` (CreateHardLinkA), `win_utimens` (SetFileTime).
+- `win32/win_compat.h`: typedefs for `mode_t` and `ssize_t`
+  (MSVC CRT lacks them).
+- `win32/rsync.manifest`: enables long-path-aware + UTF-8 active code
+  page. Embedded into rsync.exe via mt.exe in build-windows.ps1.
+- DEFERRED: actual Windows testing of symlink permission paths,
+  symlink-to-dir handling (currently always creates file-symlink),
+  utime nanosecond resolution.
+
 ### Phase 3 — Fork emulation (Linux portion, 3 of 4 sites)
 - `pipe.c::piped_child`: Windows branch calls `win_spawn_remote_shell`
   (gnulib `create_pipe_bidi` — spawns ssh.exe with bidirectional pipes).

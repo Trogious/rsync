@@ -109,7 +109,11 @@ int do_symlink(const char *lnk, const char *path)
 	}
 #endif
 
+#ifdef WIN32_NATIVE
+	return win_symlink(lnk, path);
+#else
 	return symlink(lnk, path);
+#endif
 }
 
 #if defined NO_SYMLINK_XATTRS || defined NO_SYMLINK_USER_XATTRS
@@ -137,12 +141,14 @@ ssize_t do_readlink(const char *path, char *buf, size_t bufsiz)
 #endif
 #endif
 
-#if defined HAVE_LINK || defined HAVE_LINKAT
+#if defined HAVE_LINK || defined HAVE_LINKAT || defined WIN32_NATIVE
 int do_link(const char *old_path, const char *new_path)
 {
 	if (dry_run) return 0;
 	RETURN_ERROR_IF_RO_OR_LO;
-#ifdef HAVE_LINKAT
+#ifdef WIN32_NATIVE
+	return win_link(old_path, new_path);
+#elif defined HAVE_LINKAT
 	return linkat(AT_FDCWD, old_path, AT_FDCWD, new_path, 0);
 #else
 	return link(old_path, new_path);
@@ -232,9 +238,14 @@ int do_open(const char *pathname, int flags, mode_t mode)
 	return open(pathname, flags | O_BINARY, mode);
 }
 
-#ifdef HAVE_CHMOD
+#if defined HAVE_CHMOD || defined WIN32_NATIVE
 int do_chmod(const char *path, mode_t mode)
 {
+#ifdef WIN32_NATIVE
+	if (dry_run) return 0;
+	RETURN_ERROR_IF_RO_OR_LO;
+	return win_chmod(path, mode);
+#else
 	static int switch_step = 0;
 	int code;
 
@@ -275,6 +286,7 @@ int do_chmod(const char *path, mode_t mode)
 	if (code != 0 && (preserve_perms || preserve_executability))
 		return code;
 	return 0;
+#endif /* WIN32_NATIVE */
 }
 #endif
 

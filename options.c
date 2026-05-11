@@ -3122,6 +3122,23 @@ char *check_for_hostspec(char *s, char **host_ptr, int *port_ptr)
 {
 	char *path;
 
+#ifdef WIN32_NATIVE
+	/* Avoid cwRsync's classic bug: "C:\Users\..." was parsed as host
+	 * "C" with path "\Users\..." because the colon was treated as the
+	 * host:path separator. Detect drive-letter and UNC paths early
+	 * and return NULL (= "no hostspec; treat as a local path"). */
+	if (s && win_is_drive_path(s)
+	      && (s[2] == '\0' || s[2] == '\\' || s[2] == '/')) {
+		*host_ptr = NULL;
+		return NULL;
+	}
+	if (s && win_is_unc_path(s)) {
+		/* \\server\share, \\?\..., \\.\... — all local. */
+		*host_ptr = NULL;
+		return NULL;
+	}
+#endif
+
 	if (port_ptr && strncasecmp(URL_PREFIX, s, strlen(URL_PREFIX)) == 0) {
 		*host_ptr = parse_hostspec(s + strlen(URL_PREFIX), &path, port_ptr);
 		if (*host_ptr) {
