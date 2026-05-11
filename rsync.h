@@ -316,6 +316,12 @@ enum delret {
 
 #include "config.h"
 
+/* Native Windows umbrella header: type stubs, win32/ replacements,
+ * and Windows API includes. See PORTING.md. */
+#ifdef WIN32_NATIVE
+# include "win32/win_compat.h"
+#endif
+
 /* The default RSYNC_RSH is always set in config.h. */
 
 #include <stdio.h>

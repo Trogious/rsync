@@ -16,6 +16,29 @@ tracked in `NEWS.md` (inherited from upstream).
   `.github/workflows/`.
 - Wrote `PORTING.md`, `BUILD.md`, `KNOWN-ISSUES.md`, this `CHANGELOG.md`.
 
+### Phase 2 — WIN32_NATIVE guards + win32/ stubs (Linux portion)
+- `configure.ac`: added `WIN32_NATIVE` detection via `AC_PREPROC_IFELSE`;
+  on Windows, appends `-lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32
+  -luserenv` to `LIBS`; substitutes `@WIN32_OBJS@`.
+- `Makefile.in`: added `WIN32_OBJS = @WIN32_OBJS@` and included it in
+  `OBJS`. Empty on Linux/macOS.
+- `rsync.h`: include `win32/win_compat.h` when `WIN32_NATIVE` is defined.
+- `win32/win_compat.h`: umbrella header — Windows API includes, POSIX
+  type stubs (`uid_t`, `gid_t`, `pid_t`), forward `#include`s for
+  `win_spawn.h`, `win_reexec.h`, `win_child_init.h`, `win_paths.h`,
+  `win_fs.h`, `win_ssh.h`.
+- `win32/win_*.{c,h}`: Phase 2 stubs returning `ENOSYS`. Phases 3-5
+  fill them in.
+- `win32/stub_daemon.c`: error stubs for `start_daemon`, `daemon_main`,
+  `start_accept_loop`, `start_socket_client`. Phase 6 wraps the
+  upstream daemon source in `#ifndef WIN32_NATIVE`.
+- `scripts/build-windows.ps1`: orchestrates the Windows build
+  (autoreconf inside MSYS2 bash, then `make rsync.exe` with MSVC).
+- Linux regression test: `./configure --disable-md2man && make rsync`
+  still produces a working binary.
+- DEFERRED to Windows: actually compiling `rsync.exe`, `dumpbin
+  /DEPENDENTS` verification, and any compile-error iteration.
+
 ### Phase 1 — Build infrastructure (Linux portion)
 - Added `vcpkg/vcpkg.json` manifest pinned to vcpkg release `2026.04.27`
   (SHA `56bb2411609227288b70117ead2c47585ba07713`); OpenSSL overridden to

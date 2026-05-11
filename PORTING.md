@@ -51,6 +51,22 @@ The Phase 2 work has to manually integrate gl/ into the rsync build:
 - Only build/link gl/ when `WIN32_NATIVE` is detected (Linux/BSD/macOS
   builds should be unaffected)
 
+**Deferred to first Windows session**: invoking `gl_EARLY` and `gl_INIT`
+from configure.ac conditionally. The gnulib m4 macros use `AC_REQUIRE`
+which expands at m4 time, so wrapping them in a `if test x$windows_native
+= xyes` shell conditional doesn't actually make them conditional.
+Pragmatic options to evaluate when we have Windows build feedback:
+(a) call `gl_INIT` unconditionally and handle the AC_LIBOBJ fallout on
+non-Windows by linking gl objects into a no-op archive;
+(b) maintain a small `configure.ac.win` overlay that runs on Windows
+only;
+(c) build `gl/libgnu.a` outside autoconf entirely, with a hand-written
+list of sources from `gl/Makefile.am`'s `libgnu_a_SOURCES`.
+
+Option (c) is simplest if the `*.in.h → *.h` substitutions can be
+pre-generated and committed; gnulib's `gnulib-tool --generate` mode or
+running automake once locally can produce them.
+
 ## File map (Windows-specific code)
 
 - `win32/` — all native Windows replacements and stubs
@@ -63,7 +79,10 @@ _Add an entry every time you modify an upstream `.c` or `.h` file._
 
 | File | Change | Reason |
 |---|---|---|
-| (none yet) | | |
+| `configure.ac` | Added `WIN32_NATIVE` autoconf check (AC_PREPROC_IFELSE for `_WIN32 && !__CYGWIN__ && !__MSYS__`); sets `AC_DEFINE WIN32_NATIVE` and `AC_SUBST WIN32_NATIVE=yes/no`; on Windows, appends Windows system libraries to `LIBS`. Inserted after `AC_PATH_PROG([PYTHON3])`. | Phase 2: gates all Windows-specific code paths. Linux/BSD/macOS builds unaffected (detection returns `no`). |
+| `rsync.h` | Inserted `#ifdef WIN32_NATIVE` / `#include "win32/win_compat.h"` block immediately after `#include "config.h"`. | Phase 2: pulls in Windows API headers, POSIX type stubs, and `win32/win_*.h` declarations. Block is inert when `WIN32_NATIVE` is undefined. |
+| `Makefile.in` | Added `WIN32_OBJS = @WIN32_OBJS@` line and appended `$(WIN32_OBJS)` to `OBJS`. | Phase 2: links the `win32/*.o` stubs into `rsync.exe`. Empty on Linux/macOS. |
+| `configure.ac` | Inside the `WIN32_NATIVE` shell block, set `WIN32_OBJS` to the list of `win32/*.o` files and `AC_SUBST` it. | Phase 2: feeds the object list to `Makefile.in` via `@WIN32_OBJS@`. |
 
 ## Fork sites (from upstream rsync 3.4.2)
 

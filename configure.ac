@@ -64,6 +64,30 @@ AC_SUBST(SHELL)
 AC_PATH_PROG([PERL], [perl])
 AC_PATH_PROG([PYTHON3], [python3])
 
+dnl Detect native Windows (MSVC/clang-cl), excluding Cygwin and MSYS which
+dnl provide their own POSIX emulation layer. WIN32_NATIVE gates all
+dnl Windows-specific code in this fork; see PORTING.md and win32/.
+AC_MSG_CHECKING([for Windows native build])
+AC_PREPROC_IFELSE(
+    [AC_LANG_PROGRAM([[
+        #if !defined(_WIN32) || defined(__CYGWIN__) || defined(__MSYS__)
+        # error not native windows
+        #endif
+    ]])],
+    [windows_native=yes
+     AC_DEFINE([WIN32_NATIVE], [1], [Native Windows build (not Cygwin/MSYS)])
+     AC_MSG_RESULT([yes])],
+    [windows_native=no
+     AC_MSG_RESULT([no])])
+AC_SUBST([WIN32_NATIVE], [$windows_native])
+if test x$windows_native = xyes; then
+    LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
+    WIN32_OBJS="win32/win_spawn.o win32/win_reexec.o win32/win_child_init.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/stub_daemon.o"
+else
+    WIN32_OBJS=""
+fi
+AC_SUBST([WIN32_OBJS])
+
 AC_DEFINE([_GNU_SOURCE], 1,
           [Define _GNU_SOURCE so that we get all necessary prototypes])
 

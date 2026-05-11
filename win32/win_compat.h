@@ -1,0 +1,77 @@
+/* win32/win_compat.h
+ *
+ * Umbrella header for the native Windows build. Included from rsync.h
+ * when WIN32_NATIVE is defined. Provides:
+ *   - Windows API includes (with WIN32_LEAN_AND_MEAN)
+ *   - POSIX type/macro stubs not provided by MSVC's CRT
+ *   - Forward declarations from win32/win_*.h
+ *
+ * Most actual POSIX behavior comes from the gnulib polyfills in gl/.
+ * This header only fills the gaps gnulib doesn't cover.
+ */
+#ifndef WIN32_COMPAT_H
+#define WIN32_COMPAT_H
+
+#if defined(WIN32_NATIVE)
+
+#ifndef WIN32_LEAN_AND_MEAN
+# define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <io.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+/* MSVC's CRT does not define pid_t. gnulib's sys_types.in.h does, but
+ * we typedef here too in case this header is consumed before gnulib's
+ * generated headers are on the include path. */
+#ifndef _PID_T_DEFINED
+typedef int pid_t;
+# define _PID_T_DEFINED
+#endif
+
+/* Windows has no POSIX uid/gid concept. Treat everyone as uid 0. */
+typedef int uid_t;
+typedef int gid_t;
+#define geteuid()   (0)
+#define getegid()   (0)
+#define getuid()    (0)
+#define getgid()    (0)
+#define setuid(u)   (errno = ENOSYS, -1)
+#define setgid(g)   (errno = ENOSYS, -1)
+
+/* chown / lchown — no-op stubs (return success so --archive doesn't error). */
+#define chown(p, u, g)  (0)
+#define lchown(p, u, g) (0)
+
+/* File mode bits absent from MSVC's sys/stat.h. */
+#ifndef S_IFLNK
+# define S_IFLNK 0120000
+#endif
+#ifndef S_ISLNK
+# define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
+#endif
+#ifndef S_ISSOCK
+# define S_ISSOCK(m) (0)
+#endif
+#ifndef S_ISFIFO
+# define S_ISFIFO(m) (((m) & S_IFMT) == _S_IFIFO)
+#endif
+
+/* fork() is deliberately left undeclared. Any upstream call site that
+ * still references fork() under WIN32_NATIVE must be replaced with
+ * win_spawn_remote_shell() or win_reexec_self_as() — we want a compile
+ * error to flag any missed site, not a silent link failure. */
+
+/* Forward declarations from our win32/ replacements. */
+#include "win32/win_spawn.h"
+#include "win32/win_reexec.h"
+#include "win32/win_child_init.h"
+#include "win32/win_paths.h"
+#include "win32/win_fs.h"
+#include "win32/win_ssh.h"
+
+#endif /* WIN32_NATIVE */
+#endif /* WIN32_COMPAT_H */
