@@ -81,7 +81,11 @@ pid_t win_spawn_remote_shell(char **argv, int *f_in, int *f_out)
     char *cmdline = NULL;
     BOOL ok;
 
-    if (!CreatePipe(&parent_in_r, &parent_in_w, &sa, 0)) {
+    /* CreatePipe size = 0 means "use the system default" (4 KB on most
+     * Windows builds), which is too small for rsync's protocol — the
+     * sender easily fills 4 KB of file list before the receiver drains
+     * a byte. Hint a 1 MB buffer so blocking writes are rare. */
+    if (!CreatePipe(&parent_in_r, &parent_in_w, &sa, 1 << 20)) {
         errno = EIO;
         return (pid_t)-1;
     }
@@ -89,7 +93,7 @@ pid_t win_spawn_remote_shell(char **argv, int *f_in, int *f_out)
         errno = EIO;
         goto fail;
     }
-    if (!CreatePipe(&parent_out_r, &parent_out_w, &sa, 0)) {
+    if (!CreatePipe(&parent_out_r, &parent_out_w, &sa, 1 << 20)) {
         errno = EIO;
         goto fail;
     }

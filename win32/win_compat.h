@@ -197,6 +197,14 @@ static __inline struct tm *win_localtime_r(const time_t *t, struct tm *out)
  * GetFileAttributesA elsewhere in win_fs.c. */
 #define lstat(path, buf) stat((path), (buf))
 
+/* select() — winsock's version only handles SOCKETs, but rsync's io.c
+ * calls select() on pipe fds returned by piped_child / win_spawn. Route
+ * through our shim in win32/win_select.c, which classifies each fd
+ * (socket vs pipe) and dispatches accordingly. */
+int win_select(int nfds, fd_set *readfds, fd_set *writefds,
+               fd_set *exceptfds, struct timeval *timeout);
+#define select(n, r, w, e, t) win_select((n), (r), (w), (e), (t))
+
 /* POSIX permission bits — MSVC's sys/stat.h has _S_IREAD/_S_IWRITE/
  * _S_IEXEC for owner only. Define the rest as zero (Windows ACLs
  * don't map cleanly onto rwx/group/other). */

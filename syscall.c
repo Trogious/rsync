@@ -709,6 +709,11 @@ int do_open_nofollow(const char *pathname, int flags)
 		errno = ELOOP;
 		return -1;
 	}
+#ifdef WIN32_NATIVE
+	/* MSVC's open() defaults to text mode (CRLF translation). Force
+	 * binary so rsync's byte-exact transfer semantics hold. */
+	flags |= O_BINARY;
+#endif
 	if ((fd = open(pathname, flags)) < 0)
 		return fd;
 	if (do_fstat(fd, &f_st) < 0) {
@@ -720,10 +725,16 @@ int do_open_nofollow(const char *pathname, int flags)
 		}
 		return -1;
 	}
+#ifndef WIN32_NATIVE
+	/* Windows: MSVC's stat()/fstat() don't return stable st_dev/st_ino
+	 * values (both are typically zero, or differ between calls on the
+	 * same file), so this symlink-race check spuriously fires with
+	 * EINVAL. Skip it. */
 	if (l_st.st_dev != f_st.st_dev || l_st.st_ino != f_st.st_ino) {
 		errno = EINVAL;
 		goto close_and_return_error;
 	}
+#endif
 #endif
 
 	return fd;

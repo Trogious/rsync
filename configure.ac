@@ -91,7 +91,7 @@ AH_BOTTOM([
 ])
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
-    WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/stub_daemon.o"
+    WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/win_select.o win32/stub_daemon.o"
 
     # Pre-seed autoconf cache for checks that hard-code POSIX-only headers
     # (sys/socket.h, sys/types.h, etc.) in their test programs. On Windows

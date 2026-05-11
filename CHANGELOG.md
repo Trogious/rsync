@@ -5,6 +5,50 @@ tracked in `NEWS.md` (inherited from upstream).
 
 ## Unreleased
 
+### Windows SSH-push works end-to-end (2026-05-11)
+- **Outcome**: `rsync.exe -av <localdir> user@host:/path/` transfers files
+  over SSH to a Linux rsync server and verifies byte-exact on both ends.
+  SHA-256 of a 100 KB binary file matches local↔remote. Idempotent
+  re-push transfers 0 bytes (speedup ~1200x). Tested against a Pi
+  running rsync 3.2.7 / OpenSSH on a non-default port via `RSYNC_RSH`.
+- **Four blockers fixed to get there:**
+  1. `win32/win_select.c` (new, ~170 LOC): `select()` shim that
+     classifies each fd via `GetFileType` + `GetNamedPipeInfo`. Sockets
+     defer to winsock select; pipes use `PeekNamedPipe` for read-readiness
+     and assume always-writable. Polls at 10 ms cadence when nothing is
+     ready. Plugged in via `#define select win_select` in win_compat.h
+     and added to `WIN32_OBJS` in configure.ac. Without this, every
+     call site in `io.c` (the I/O dispatcher) hung forever waiting for
+     winsock select to recognize anonymous-pipe fds.
+  2. `win_spawn.c`: bumped `CreatePipe` buffer hint from default (~4 KB)
+     to 1 MB. Avoids blocking-write deadlocks during the file-list
+     phase, where the sender's outgoing flow is bursty.
+  3. `util1.c::change_dir`: under WIN32_NATIVE, accept `X:\…`, `X:/…`,
+     and `\\…` as absolute paths in addition to `/…`. Without this,
+     rsync prepended `curr_dir` to a Windows-absolute path and tried
+     to chdir to a mangled `C:\cwd/C:\src/…` string. Also normalize
+     `curr_dir` to forward-slash form immediately after `getcwd()` so
+     subsequent path joins don't mix separators.
+  4. `syscall.c::do_open_nofollow`: (a) force `O_BINARY` into the
+     `open()` flags on Windows (MSVC defaults to text mode with CRLF
+     translation — breaks rsync's byte-exact contract). (b) Skip the
+     post-open `l_st.st_dev != f_st.st_dev || l_st.st_ino !=
+     f_st.st_ino` symlink-race check on Windows: MSVC's stat()/fstat()
+     don't return stable `st_dev`/`st_ino` values for the same file
+     across calls, so the check spuriously triggers `EINVAL`.
+- **Not yet working / not tested:**
+  - **Pull** (`rsync user@host:/src/ C:\dst\`): probably still hangs.
+    The local side becomes the *receiver*, which forks generator from
+    receiver in `do_recv`. That fork goes through `win_fork()` 
+    (`RtlCloneUserProcess`) — same code path as local-to-local, which
+    we know deadlocks.
+  - **Local copy** (`rsync C:\src\ C:\dst\`): two forks (`local_child`
+    + `do_recv`). Same fork issue.
+  - All the path-handling fixes here are minimum-viable — they cover
+    "absolute Windows path as source for SSH push". Round-tripping
+    permissions, owner/group naming, and symlink targets through the
+    remote isn't exercised yet.
+
 ### Windows build brought up to first working `rsync.exe` (2026-05-11)
 - **Outcome**: `scripts/build-windows.ps1` produces a 5.5 MB `rsync.exe`
   that passes `verify-static.ps1` (no Cygwin / MSYS / vcruntime DLLs;

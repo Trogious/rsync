@@ -1125,6 +1125,13 @@ int change_dir(const char *dir, int set_path_only)
 			rsyserr(FERROR, errno, "getcwd()");
 			exit_cleanup(RERR_FILESELECT);
 		}
+#ifdef WIN32_NATIVE
+		/* Windows getcwd returns backslash-separated paths.
+		 * Normalize to forward slashes — rsync's path-cleaning routines
+		 * (clean_fname etc.) only understand '/' as a separator. The
+		 * Win32 file APIs accept both. */
+		for (char *p = curr_dir; *p; p++) if (*p == '\\') *p = '/';
+#endif
 		curr_dir_len = strlen(curr_dir);
 	}
 
@@ -1135,7 +1142,19 @@ int change_dir(const char *dir, int set_path_only)
 	if (len == 1 && *dir == '.' && (!skipped_chdir || set_path_only))
 		return 1;
 
-	if (*dir == '/') {
+#ifdef WIN32_NATIVE
+	/* Treat Windows-style absolute paths (drive letter / UNC) as absolute
+	 * too, otherwise we end up concatenating "C:\Users\Trog\rsync/" +
+	 * "C:\Users\..." and chdir() fails. */
+	int is_absolute = (*dir == '/'
+	                || (len >= 2 && ((dir[0] >= 'A' && dir[0] <= 'Z')
+	                                 || (dir[0] >= 'a' && dir[0] <= 'z'))
+	                              && dir[1] == ':')
+	                || (len >= 2 && dir[0] == '\\' && dir[1] == '\\'));
+#else
+	int is_absolute = (*dir == '/');
+#endif
+	if (is_absolute) {
 		if (len >= sizeof curr_dir) {
 			errno = ENAMETOOLONG;
 			return 0;
