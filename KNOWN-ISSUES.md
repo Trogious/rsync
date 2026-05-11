@@ -1,0 +1,63 @@
+# KNOWN-ISSUES.md — rsync-native-windows
+
+## Unsupported in this build
+
+The following upstream rsync features are intentionally excised or stubbed:
+
+- `--daemon` mode (run as `rsyncd`)
+- `--config=FILE` (rsyncd.conf parsing)
+- `rsync://host/module/path` URLs (daemon connections)
+- Connecting to a remote daemon via `host::module` syntax
+- ACLs (`-A` / `--acls`)
+- Extended attributes (`-X` / `--xattrs`)
+- chown / chgrp on the receiving Windows side
+- SELinux contexts
+
+Use rsync-over-ssh instead of daemon mode. ACL/xattr/POSIX-ownership flags
+will silently no-op on the Windows side; the wire protocol still negotiates
+them when talking to a Linux peer.
+
+## Path parsing: drive-relative form
+
+The Windows drive-relative form `C:foo` (where `foo` is resolved against the
+current working directory of drive `C:`) is parsed as a REMOTE host
+specification, not a local path. This matches cwRsync behavior. To force
+local interpretation, prefix with `.\`:
+
+```
+rsync .\C:foo dst/    # local
+rsync C:foo dst/      # parsed as host "C", path "foo"
+```
+
+Absolute drive paths (`C:\foo`, `C:/foo`) and bare drive references
+(`C:`) are always treated as local — these are the common cases.
+
+## Long paths
+
+Long-path awareness (>260 characters) is enabled via the embedded
+application manifest (`win32/rsync.manifest`). On systems without the
+LongPathsEnabled registry setting, individual filesystem APIs may still
+reject long paths; rsync transparently retries with the `\\?\` prefix
+where possible.
+
+## Symlinks
+
+Creating symlinks requires either:
+
+- Windows Developer Mode enabled (Windows 10 1703+), OR
+- Running as Administrator, OR
+- The user having `SeCreateSymbolicLinkPrivilege`
+
+If symlink creation fails for permission reasons, `rsync` falls back to
+copying the target's contents and emits a warning. To make this fatal
+instead, set the env var `RSYNC_STRICT_SYMLINKS=1`.
+
+## SSH client discovery
+
+`rsync` searches for ssh in this order:
+
+1. `$RSYNC_RSH` environment variable
+2. `%SystemRoot%\System32\OpenSSH\ssh.exe` (Windows built-in OpenSSH)
+3. `ssh.exe` on `PATH`
+
+Override with `-e <command>` if needed.
