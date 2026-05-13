@@ -30,7 +30,7 @@ extern int need_unsorted_flist;
 extern ROLE_TLS int output_needs_newline;
 extern int stdout_format_has_i;
 extern struct stats stats;
-extern struct file_list *cur_flist;
+extern ROLE_TLS struct file_list *cur_flist;
 
 BOOL want_progress_now = False;
 

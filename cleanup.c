@@ -107,6 +107,7 @@ NORETURN void _exit_cleanup(int code, const char *file, int line)
 	static const char *exit_file = NULL;
 	static int first_code = 0;
 
+
 	SIGACTION(SIGUSR1, SIG_IGN);
 	SIGACTION(SIGUSR2, SIG_IGN);
 

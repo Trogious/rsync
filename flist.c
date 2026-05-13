@@ -31,6 +31,7 @@ extern int am_server;
 extern int am_daemon;
 extern int am_sender;
 extern ROLE_TLS int am_generator;
+extern ROLE_TLS int am_receiver;
 extern int inc_recurse;
 extern int always_checksum;
 extern int module_id;
@@ -98,10 +99,24 @@ int io_error;
 int flist_csum_len;
 dev_t filesystem_dev; /* used to implement -x */
 
-struct file_list *cur_flist, *first_flist, *dir_flist;
-int send_dir_ndx = -1, send_dir_depth = -1;
-int flist_cnt = 0; /* how many (non-tmp) file list objects exist */
-int file_total = 0; /* total of all active items over all file-lists */
+/* cur_flist + first_flist are per-thread navigation pointers (TLS). Each
+ * thread iterates the shared chain at its own pace. The underlying flist
+ * memory + prev/next links are SHARED — only the receiver mutates the
+ * chain (via flist_new). dir_flist is shared too; only receiver appends
+ * to it. Memory destruction is deferred until process exit. */
+ROLE_TLS struct file_list *cur_flist, *first_flist;
+struct file_list *dir_flist;
+#ifdef WIN32_NATIVE
+/* Anchor that survives flist_free's per-thread advance of first_flist.
+ * Set when the initial flist is built (main thread, before split) so
+ * generator's wait_for_receiver can walk the full chain by parent_ndx
+ * after its own first_flist has advanced past the freed entries. */
+struct file_list *win_chain_anchor;
+#endif
+
+ROLE_TLS int send_dir_ndx = -1, send_dir_depth = -1;
+ROLE_TLS int flist_cnt = 0; /* how many (non-tmp) file list objects exist */
+ROLE_TLS int file_total = 0; /* total of all active items over all file-lists */
 int file_old_total = 0; /* total of active items that will soon be gone */
 int flist_eof = 0; /* all the file-lists are now known */
 int xfer_flags_as_varint = 0;
@@ -2923,6 +2938,9 @@ static struct file_list *flist_new(int flags, const char *msg)
 			flist->ndx_start = flist->flist_num = inc_recurse ? 1 : 0;
 
 			first_flist = cur_flist = flist->prev = flist;
+#ifdef WIN32_NATIVE
+			win_chain_anchor = flist;
+#endif
 		} else {
 			struct file_list *prev = first_flist->prev;
 
@@ -2965,6 +2983,16 @@ void flist_free(struct file_list *flist)
 		flist_cnt--;
 	}
 
+#ifdef WIN32_NATIVE
+	/* Threads share the underlying flist memory + the common file_pool
+	 * (allocated in flist_new for the first flist, with subsequent
+	 * flists sharing it). We can't safely pool_destroy any of them
+	 * while other live flists are still using the same pool — and on
+	 * Windows there's no fork() partition between generator + receiver
+	 * memory. Leak the per-flist heap; the process exit reclaims
+	 * everything. Future refinement: track pool refs separately. */
+	return;
+#endif
 	if (!flist->prev || !flist_cnt)
 		pool_destroy(flist->file_pool);
 	else

@@ -75,7 +75,7 @@ extern int flist_eof;
 extern int allowed_lull;
 extern ROLE_TLS int sock_f_out;
 extern int protocol_version;
-extern int file_total;
+extern ROLE_TLS int file_total;
 extern int fuzzy_basis;
 extern int always_checksum;
 extern int flist_csum_len;
@@ -97,7 +97,8 @@ extern mode_t orig_umask;
 extern uid_t our_uid;
 extern char *tmpdir;
 extern char *basis_dir[MAX_BASIS_DIRS+1];
-extern struct file_list *cur_flist, *first_flist, *dir_flist;
+extern ROLE_TLS struct file_list *cur_flist, *first_flist;
+extern struct file_list *dir_flist;
 extern filter_rule_list filter_list, daemon_filter_list;
 
 int maybe_ATTRS_REPORT = 0;

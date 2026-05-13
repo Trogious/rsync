@@ -33,6 +33,50 @@
 #include <errno.h>
 #include <process.h>   /* _beginthreadex */
 
+/* Crash diagnostics: install a process-wide unhandled-exception filter
+ * that writes the exception code + address to recv-trace.log so we can
+ * tell which thread crashed and why. Called from main() at startup. */
+static LONG WINAPI win_crash_handler(EXCEPTION_POINTERS *info)
+{
+    FILE *_dbg = fopen("C:\\Users\\Trog\\rsync\\recv-trace.log", "a");
+    if (_dbg) {
+        HMODULE base = GetModuleHandleA(NULL);
+        fprintf(_dbg, "[CRASH] code=0x%08lx address=%p tid=%lu image_base=%p",
+            (unsigned long)info->ExceptionRecord->ExceptionCode,
+            info->ExceptionRecord->ExceptionAddress,
+            GetCurrentThreadId(),
+            (void *)base);
+        if (info->ExceptionRecord->NumberParameters >= 2) {
+            fprintf(_dbg, " op=%lu fault_addr=%p",
+                (unsigned long)info->ExceptionRecord->ExceptionInformation[0],
+                (void *)info->ExceptionRecord->ExceptionInformation[1]);
+        }
+        fprintf(_dbg, "\n");
+        /* Stack walk: capture up to 16 frames. Print as RVA (offset from
+         * image base) for easy lookup in rsync.map. */
+        void *frames[16];
+        USHORT n = CaptureStackBackTrace(0, 16, frames, NULL);
+        fprintf(_dbg, "[CRASH] stack (%u frames, RVA from image_base):\n", n);
+        for (USHORT i = 0; i < n; i++) {
+            uintptr_t rva = (uintptr_t)frames[i] - (uintptr_t)base;
+            fprintf(_dbg, "    %2u: %p  rva=0x%llx\n",
+                i, frames[i], (unsigned long long)rva);
+        }
+        uintptr_t crash_rva = (uintptr_t)info->ExceptionRecord->ExceptionAddress - (uintptr_t)base;
+        fprintf(_dbg, "[CRASH] crash_rva=0x%llx (preferred image base 0x140000000 → look up MAP at 0x%llx)\n",
+            (unsigned long long)crash_rva,
+            (unsigned long long)(0x140000000ULL + crash_rva));
+        fflush(_dbg);
+        fclose(_dbg);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void win_install_crash_handler(void)
+{
+    SetUnhandledExceptionFilter(win_crash_handler);
+}
+
 struct win_thread_ctx {
     win_thread_main_t fn;
     void             *arg;

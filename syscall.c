@@ -294,7 +294,27 @@ int do_rename(const char *old_path, const char *new_path)
 {
 	if (dry_run) return 0;
 	RETURN_ERROR_IF_RO_OR_LO;
+#ifdef WIN32_NATIVE
+	/* POSIX rename(2) atomically replaces the destination; the C runtime
+	 * rename() on Windows refuses if the destination exists (EEXIST).
+	 * MoveFileExA with MOVEFILE_REPLACE_EXISTING gives us the POSIX-like
+	 * semantics rsync's robust_rename / finish_transfer paths expect. */
+	if (MoveFileExA(old_path, new_path,
+	                MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+		return 0;
+	switch (GetLastError()) {
+	case ERROR_FILE_NOT_FOUND:    errno = ENOENT; break;
+	case ERROR_PATH_NOT_FOUND:    errno = ENOENT; break;
+	case ERROR_ACCESS_DENIED:     errno = EACCES; break;
+	case ERROR_ALREADY_EXISTS:    errno = EEXIST; break;
+	case ERROR_FILE_EXISTS:       errno = EEXIST; break;
+	case ERROR_SHARING_VIOLATION: errno = EBUSY;  break;
+	default:                      errno = EIO;    break;
+	}
+	return -1;
+#else
 	return rename(old_path, new_path);
+#endif
 }
 
 #ifdef HAVE_FTRUNCATE

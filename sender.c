@@ -52,7 +52,8 @@ extern int write_batch;
 extern int file_old_total;
 extern BOOL want_progress_now;
 extern struct stats stats;
-extern struct file_list *cur_flist, *first_flist, *dir_flist;
+extern ROLE_TLS struct file_list *cur_flist, *first_flist;
+extern struct file_list *dir_flist;
 extern char num_dev_ino_buf[4 + 8 + 8];
 
 BOOL extra_flist_sending_enabled;

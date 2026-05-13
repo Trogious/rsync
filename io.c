@@ -48,7 +48,7 @@ extern int io_error;
 extern int batch_fd;
 extern int eol_nulls;
 extern int flist_eof;
-extern int file_total;
+extern ROLE_TLS int file_total;
 extern int file_old_total;
 extern int list_only;
 extern int read_batch;
@@ -64,7 +64,8 @@ extern BOOL extra_flist_sending_enabled;
 extern BOOL flush_ok_after_signal;
 extern struct stats stats;
 extern time_t stop_at_utime;
-extern struct file_list *cur_flist;
+extern ROLE_TLS struct file_list *cur_flist, *first_flist;
+extern struct file_list *win_chain_anchor;
 #ifdef ICONV_OPTION
 extern int filesfrom_convert;
 extern iconv_t ic_send, ic_recv;
@@ -73,7 +74,15 @@ extern iconv_t ic_send, ic_recv;
 int csum_length = SHORT_SUM_LENGTH; /* initial value */
 int allowed_lull = 0;
 int msgdone_cnt = 0;
-int forward_flist_data = 0;
+/* forward_flist_data: when nonzero, read_buf() forwards every byte it
+ * reads to iobuf.out_fd. The RECEIVER thread sets this while pulling an
+ * incremental file-list off the protocol pipe so that the GENERATOR
+ * thread (reading from error_pipe[0]) sees the same flist bytes. It MUST
+ * be ROLE_TLS — if the generator thread also sees flag=1 set by the
+ * receiver, its own read_buf calls will write to ITS iobuf.out_fd (the
+ * protocol pipe to the remote sender), corrupting the protocol stream
+ * and deadlocking inc-recursive mode. */
+ROLE_TLS int forward_flist_data = 0;
 BOOL flist_receiving_enabled = False;
 
 /* Ignore an EOF error if non-zero. See whine_about_eof(). */
@@ -1730,6 +1739,74 @@ static void drain_multiplex_messages(void)
 	}
 }
 
+#ifdef WIN32_NATIVE
+/* iobuf.in transfer across the do_recv thread boundary.
+ *
+ * Problem: in POSIX fork, the receiver child inherits the parent's
+ * iobuf.in buffered contents — including any bytes the parent has
+ * peeked at past the initial flist (typically the NDX_FLIST_EOF marker
+ * which is sent contiguously after the flist).  Our thread model has
+ * a TLS iobuf per thread; the receiver thread's iobuf.in starts empty
+ * and those buffered bytes would be lost when the parent transitions
+ * to generator role (io_end_multiplex_in wipes the buffer).
+ *
+ * iobuf_snapshot_in_state() called from the parent BEFORE
+ * io_end_multiplex_in saves whatever is buffered into a malloc'd blob.
+ * iobuf_restore_in_state() called from the receiver thread AFTER
+ * io_start_multiplex_in copies the bytes back into the receiver's
+ * fresh iobuf.in. The struct is declared in win32/win_compat.h. */
+
+void iobuf_snapshot_in_state(struct iobuf_in_snapshot *snap)
+{
+    snap->bytes = NULL;
+    snap->len = 0;
+    snap->raw_input_ends_offset = 0;
+    snap->in_multiplexed = iobuf.in_multiplexed;
+    if (!iobuf.in.buf || iobuf.in.len == 0)
+        return;
+    snap->bytes = (char *)malloc(iobuf.in.len);
+    if (!snap->bytes)
+        return;
+    /* iobuf.in is a circular buffer; pos may wrap. Copy contiguously. */
+    size_t first = iobuf.in.size - iobuf.in.pos;
+    if (first >= iobuf.in.len) {
+        memcpy(snap->bytes, iobuf.in.buf + iobuf.in.pos, iobuf.in.len);
+    } else {
+        memcpy(snap->bytes, iobuf.in.buf + iobuf.in.pos, first);
+        memcpy(snap->bytes + first, iobuf.in.buf, iobuf.in.len - first);
+    }
+    snap->len = iobuf.in.len;
+    if (iobuf.raw_input_ends_before) {
+        /* raw_input_ends_before is an absolute position in the circular
+         * buffer.  Translate to an offset from iobuf.in.pos. */
+        size_t end = iobuf.raw_input_ends_before;
+        if (end < iobuf.in.pos)
+            end += iobuf.in.size; /* wrapped */
+        snap->raw_input_ends_offset = end - iobuf.in.pos;
+    }
+}
+
+void iobuf_restore_in_state(struct iobuf_in_snapshot *snap)
+{
+    if (!snap || !snap->bytes || snap->len == 0)
+        return;
+    /* iobuf.in.buf must already exist (io_start_buffering_in allocated
+     * it).  Place the bytes at pos=0 and set len. */
+    if (!iobuf.in.buf || iobuf.in.size < snap->len) {
+        free(snap->bytes);
+        snap->bytes = NULL;
+        return;
+    }
+    memcpy(iobuf.in.buf, snap->bytes, snap->len);
+    iobuf.in.pos = 0;
+    iobuf.in.len = snap->len;
+    iobuf.in_multiplexed = snap->in_multiplexed;
+    iobuf.raw_input_ends_before = snap->raw_input_ends_offset;  /* now an absolute pos since we copied to pos=0 */
+    free(snap->bytes);
+    snap->bytes = NULL;
+}
+#endif /* WIN32_NATIVE */
+
 void wait_for_receiver(void)
 {
 	if (!iobuf.raw_input_ends_before)
@@ -1757,8 +1834,34 @@ void wait_for_receiver(void)
 				rprintf(FINFO, "[%s] receiving flist for dir %d\n",
 					who_am_i(), ndx);
 			}
+#ifdef WIN32_NATIVE
+			/* On Windows the receiver thread already built this
+			 * flist (see rsync.c:read_ndx_and_attrs) and signalled
+			 * us by writing dir_ndx to its f_out (our iobuf.in_fd).
+			 * Look up the existing flist in the shared chain
+			 * instead of calling recv_file_list, which would race
+			 * with the receiver's flist_new on the shared chain
+			 * (flist_new mutates prev/next links).
+			 *
+			 * Walk from win_chain_anchor (the initial flist, set
+			 * once and never advanced) rather than first_flist,
+			 * because the generator's per-thread first_flist may
+			 * have been advanced past the freed entries by its own
+			 * flist_free calls in check_for_finished_files. */
+			for (flist = win_chain_anchor; flist; flist = flist->next) {
+				if (flist->parent_ndx == ndx)
+					break;
+			}
+			if (!flist) {
+				rprintf(FERROR,
+					"[%s] no flist found for dir %d in shared chain\n",
+					who_am_i(), ndx);
+				exit_cleanup(RERR_PROTOCOL);
+			}
+#else
 			flist = recv_file_list(iobuf.in_fd, ndx);
 			flist->parent_ndx = ndx;
+#endif
 #ifdef SUPPORT_HARD_LINKS
 			if (preserve_hard_links)
 				match_hard_links(flist);
@@ -1892,8 +1995,20 @@ int64 read_longint(int f)
 void read_buf(int f, char *buf, size_t len)
 {
 	if (f != iobuf.in_fd) {
-		if (safe_read(f, buf, len) != len)
+		if (safe_read(f, buf, len) != len) {
+#ifdef WIN32_NATIVE
+			/* On Windows we route do_recv's receiver/generator
+			 * IPC through threads in one process. When the
+			 * receiver thread exits and closes its error_pipe
+			 * write end, this read_buf path (f differs from
+			 * iobuf.in_fd because perform_io has already flagged
+			 * iobuf.in_fd=-2) hits EOF. Allow kluge_around_eof
+			 * to map that EOF to a clean exit_cleanup(0). */
+			whine_about_eof(True);
+#else
 			whine_about_eof(False); /* Doesn't return. */
+#endif
+		}
 		goto batch_copy;
 	}
 

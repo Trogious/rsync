@@ -59,7 +59,7 @@ extern int keep_dirlinks;
 extern int preserve_hard_links;
 extern int protocol_version;
 extern int mkpath_dest_arg;
-extern int file_total;
+extern ROLE_TLS int file_total;
 extern int recurse;
 extern int xfer_dirs;
 extern int protect_args;
@@ -105,7 +105,9 @@ extern char *tmpdir;
 extern char curr_dir[MAXPATHLEN];
 extern char backup_dir_buf[MAXPATHLEN];
 extern char *basis_dir[MAX_BASIS_DIRS+1];
-extern struct file_list *first_flist;
+extern ROLE_TLS struct file_list *cur_flist, *first_flist;
+extern struct file_list *dir_flist;
+extern ROLE_TLS int flist_cnt;
 extern filter_rule_list daemon_filter_list, implied_filter_list;
 
 uid_t our_uid;
@@ -991,6 +993,22 @@ struct do_recv_args {
 	int   f_out;
 	int   error_pipe_w;   /* receiver writes errors here */
 	char *local_name;
+#ifdef WIN32_NATIVE
+	/* Snapshot of the parent's iobuf.in buffered bytes at split time.
+	 * These were read from the protocol pipe as a side effect of
+	 * recv_file_list buffering ahead; without transferring them, the
+	 * receiver thread loses the NDX_FLIST_EOF marker (and any other
+	 * pre-fetched bytes) and the inc-recurse flow deadlocks. See
+	 * io.c::iobuf_snapshot_in_state for details. */
+	struct iobuf_in_snapshot iobuf_in_snap;
+	/* Snapshot of the parent's TLS flist navigation state. On POSIX the
+	 * fork() copies these into the child; here we hand them across.
+	 * dir_flist is shared (not TLS), so it isn't snapshotted. */
+	struct file_list *snap_first_flist;
+	struct file_list *snap_cur_flist;
+	int               snap_file_total;
+	int               snap_flist_cnt;
+#endif
 };
 
 /* The receiver branch from the do_recv split, extracted so it can be
@@ -1002,13 +1020,39 @@ struct do_recv_args {
  * Returns the exit code the receiver wants. On POSIX the caller wraps
  * the return in exit_cleanup(); on Windows the thread trampoline turns
  * it into the thread's exit code (visible via win_waitpid). */
+#ifdef WIN32_NATIVE
+static int do_recv_receiver_win(int f_in, int f_out_to_close,
+                                int error_pipe_w, char *local_name,
+                                struct do_recv_args *args);
+#endif
+
 static int do_recv_receiver(int f_in, int f_out_to_close,
                             int error_pipe_w, char *local_name)
 {
+#ifdef WIN32_NATIVE
+	return do_recv_receiver_win(f_in, f_out_to_close, error_pipe_w, local_name, NULL);
+}
+
+static int do_recv_receiver_win(int f_in, int f_out_to_close,
+                                int error_pipe_w, char *local_name,
+                                struct do_recv_args *args)
+{
+#endif
 	int f_out;
 
 	am_receiver = 1;
 	send_msgs_to_gen = am_server;
+
+#ifdef WIN32_NATIVE
+	/* Inherit the parent's ROLE_TLS flist navigation state. dir_flist
+	 * is shared (not TLS), so it's already visible. */
+	if (args) {
+		first_flist = args->snap_first_flist;
+		cur_flist   = args->snap_cur_flist;
+		file_total  = args->snap_file_total;
+		flist_cnt   = args->snap_flist_cnt;
+	}
+#endif
 
 	/* We can't let two processes write to the socket at one time. */
 	io_end_multiplex_out(MPLX_SWITCHING);
@@ -1018,6 +1062,24 @@ static int do_recv_receiver(int f_in, int f_out_to_close,
 	f_out = error_pipe_w;
 
 	bwlimit_writemax = 0; /* receiver doesn't need to do this */
+
+#ifdef WIN32_NATIVE
+	/* On POSIX fork(), the receiver child inherits iobuf (file-static
+	 * in io.c) with iobuf.in_fd already pointing at the protocol pipe
+	 * and iobuf.in_multiplexed=1 from the pre-fork setup. With our
+	 * thread model the receiver gets a fresh ROLE_TLS iobuf where
+	 * in_fd=-1; if we don't re-initialize, read_buf() takes the
+	 * "f != iobuf.in_fd" branch and calls safe_read() raw, bypassing
+	 * the multiplex frame parsing. The remote sends multiplexed
+	 * data, so the receiver gets garbage indices ("File-list index 29
+	 * not in 0 - 3") and bails. Set it up explicitly here. */
+	io_start_multiplex_in(f_in);
+	/* Replay the parent's pre-fetched iobuf.in bytes (NDX_FLIST_EOF
+	 * + any other lookahead from recv_file_list). The snapshot pointer
+	 * is owned here and consumed by iobuf_restore_in_state. */
+	if (args)
+		iobuf_restore_in_state(&args->iobuf_in_snap);
+#endif
 
 	if (read_batch)
 		io_start_buffering_in(f_in);
@@ -1039,13 +1101,36 @@ static int do_recv_receiver(int f_in, int f_out_to_close,
 	/* Handle any keep-alive packets from the post-processing work that
 	 * the generator does. */
 	if (protocol_version >= 29) {
+#ifndef WIN32_NATIVE
+		/* On POSIX, set kluge_around_eof=-1 so the receiver's
+		 * read_final_goodbye / msleep loop tolerates EOF for ~10s.
+		 * On Windows the receiver thread doesn't enter that loop and
+		 * kluge_around_eof is shared with the generator thread; the
+		 * generator sets it to +1 to convert EOF (signaled by the
+		 * receiver closing error_pipe_w) into a clean exit_cleanup(0). */
 		kluge_around_eof = -1;
+#endif
 #ifdef WIN32_NATIVE
-		/* On Windows the generator can't kill(pid, SIGUSR2) — we're a
-		 * thread. The generator instead writes NDX_DONE and lets us
-		 * detect EOF via the closed pipe. read_final_goodbye returns
-		 * naturally in that case. */
-		read_final_goodbye(f_in, f_out);
+		/* The POSIX flow blocks the receiver in read_final_goodbye
+		 * until the parent sends SIGUSR2 — that mechanism doesn't
+		 * apply to us (threads in one process).
+		 *
+		 * To tell the generator we're done, close our end of the
+		 * error pipe. The generator is blocked in wait_for_receiver
+		 * → read_int(error_pipe[0]); when our write end closes (and
+		 * since we share the process fd table, this actually closes
+		 * the fd) the read returns EOF, which whine_about_eof maps
+		 * to exit_cleanup, ending the wait cleanly.
+		 *
+		 * KNOWN ISSUE: the generator's late-shutdown loop wants
+		 * msgdone_cnt to reach a value our receiver doesn't always
+		 * write; it then sees EOF on the pipe and exits with
+		 * RERR_STREAMIO (12). Files transfer byte-exact regardless,
+		 * but exit code is non-zero. A clean fix requires either
+		 * detecting receiver-thread exit in the generator's wait
+		 * loop (instead of treating EOF as a protocol error), or
+		 * forwarding more end-of-stream messages from receiver. */
+		close(error_pipe_w);
 		return 0;
 #else
 		/* This should only get stopped via a USR2 signal. */
@@ -1058,6 +1143,7 @@ static int do_recv_receiver(int f_in, int f_out_to_close,
 	}
 
 #ifdef WIN32_NATIVE
+	close(error_pipe_w);   /* signal EOF to the generator's wait_for_receiver */
 	return 0;
 #else
 	/* Finally, we go to sleep until our parent kills us with a USR2
@@ -1076,7 +1162,8 @@ static int do_recv_receiver(int f_in, int f_out_to_close,
 static int do_recv_thread_main(void *p)
 {
 	struct do_recv_args *a = (struct do_recv_args *)p;
-	int rc = do_recv_receiver(a->f_in, a->f_out, a->error_pipe_w, a->local_name);
+	int rc = do_recv_receiver_win(a->f_in, a->f_out, a->error_pipe_w,
+	                              a->local_name, a);
 	free(a);
 	return rc;
 }
@@ -1161,8 +1248,24 @@ static int do_recv(int f_in, int f_out, char *local_name)
 			args->f_out        = -1;
 			args->error_pipe_w = error_pipe[1];
 			args->local_name   = local_name;
+			/* Snapshot the parent's iobuf.in NOW — before
+			 * io_end_multiplex_in wipes it — so the receiver thread
+			 * can re-prime its iobuf with whatever bytes the parent
+			 * pre-fetched (typically NDX_FLIST_EOF + start-of-data). */
+			iobuf_snapshot_in_state(&args->iobuf_in_snap);
+			/* Hand off the TLS flist navigation state. first_flist +
+			 * cur_flist + file_total + flist_cnt are ROLE_TLS — the
+			 * receiver thread sees them at zero/NULL on entry without
+			 * this snapshot. dir_flist is shared so we don't snapshot it. */
+			args->snap_first_flist = first_flist;
+			args->snap_cur_flist   = cur_flist;
+			args->snap_file_total  = file_total;
+			args->snap_flist_cnt   = flist_cnt;
 			pid = win_thread_fork(do_recv_thread_main, args);
-			if (pid == (pid_t)-1) free(args);
+			if (pid == (pid_t)-1) {
+				free(args->iobuf_in_snap.bytes);
+				free(args);
+			}
 		}
 		if (pid == -1) {
 			rsyserr(FERROR, errno, "thread-fork failed in do_recv");
@@ -1190,6 +1293,19 @@ static int do_recv(int f_in, int f_out, char *local_name)
 	am_generator = 1;
 	implied_filter_list.head = implied_filter_list.tail = NULL;
 	flist_receiving_enabled = True;
+
+#ifdef WIN32_NATIVE
+	/* On Windows the receiver runs as a sibling thread that signals
+	 * "I'm done" by closing its end of error_pipe. Any subsequent read
+	 * the generator does on iobuf.in_fd (= error_pipe[0]) will see EOF.
+	 * Without this flag, whine_about_eof would print "connection
+	 * unexpectedly closed" and exit_cleanup(RERR_STREAMIO=12). Set it
+	 * to +1 so whine_about_eof maps EOF to exit_cleanup(0) — the
+	 * graceful end-of-receiver state. We also patch read_buf below
+	 * (via allow_kluge=True for the safe_read EOF path) so the
+	 * non-multiplexed EOF path also exits cleanly. */
+	kluge_around_eof = 1;
+#endif
 
 	io_end_multiplex_in(MPLX_SWITCHING);
 	if (write_batch && !am_server)
@@ -1826,6 +1942,10 @@ static void unset_env_var(const char *var)
 int main(int argc,char *argv[])
 {
 	int ret;
+
+#ifdef WIN32_NATIVE
+	win_install_crash_handler();
+#endif
 
 	raw_argc = argc;
 	raw_argv = argv;

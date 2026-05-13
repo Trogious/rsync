@@ -70,8 +70,8 @@ chmod +x configure.sh
 export CC='$repoMsys/build-aux/compile cl.exe -nologo'
 export AR='$repoMsys/build-aux/ar-lib lib.exe -nologo'
 export RANLIB=true
-export CFLAGS='-MT -O2 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS -DWIN32_NATIVE'
-export LDFLAGS=''
+export CFLAGS='-MT -O2 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS -DWIN32_NATIVE -Z7'
+export LDFLAGS='-Wl,-MAP:rsync.map -Wl,-DEBUG'
 # cl.exe accepts .lib filenames directly on the command line; INCLUDE/LIB
 # env vars (set by vcvars64.bat + extended above) tell it where to look.
 export LIBS='libcrypto.lib zstd.lib lz4.lib xxhash.lib ws2_32.lib advapi32.lib iphlpapi.lib crypt32.lib secur32.lib userenv.lib bcrypt.lib user32.lib'

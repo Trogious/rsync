@@ -53,7 +53,8 @@ extern int file_old_total;
 extern int keep_dirlinks;
 extern int make_backups;
 extern int sanitize_paths;
-extern struct file_list *cur_flist, *first_flist, *dir_flist;
+extern ROLE_TLS struct file_list *cur_flist, *first_flist;
+extern struct file_list *dir_flist;
 extern struct chmod_mode_struct *daemon_chmod_modes;
 #ifdef ICONV_OPTION
 extern char *iconv_opt;
@@ -356,6 +357,15 @@ int read_ndx_and_attrs(int f_in, int f_out, int *iflag_ptr, uchar *type_ptr, cha
 			if (DEBUG_GTE(FLIST, 3))
 				rprintf(FINFO, "[%s] flist_eof=1\n", who_am_i());
 			write_int(f_out, NDX_FLIST_EOF);
+#ifdef WIN32_NATIVE
+			/* On Windows the generator runs in a sibling thread and is
+			 * blocked in wait_for_receiver() reading from error_pipe.
+			 * write_int buffers in iobuf.out; if we don't flush here,
+			 * the NDX_FLIST_EOF stays in our buffer while the generator
+			 * waits and the remote also waits (for our generator's next
+			 * action), producing an inc-recurse deadlock. */
+			io_flush(NORMAL_FLUSH);
+#endif
 			continue;
 		}
 		ndx = NDX_FLIST_OFFSET - ndx;
@@ -373,11 +383,28 @@ int read_ndx_and_attrs(int f_in, int f_out, int *iflag_ptr, uchar *type_ptr, cha
 			rprintf(FINFO, "[%s] receiving flist for dir %d\n",
 				who_am_i(), ndx);
 		}
+#ifdef WIN32_NATIVE
+		/* On Windows the generator + receiver are sibling threads in one
+		 * process (the rsync chain in first_flist is shared memory). The
+		 * POSIX approach of forwarding the flist's raw bytes to the
+		 * generator and having it call recv_file_list independently
+		 * would corrupt the shared chain (concurrent flist_new mutates
+		 * shared prev/next links). Instead: build the flist here, then
+		 * write the dir_ndx to the generator pipe as a "ready" signal
+		 * after the chain is consistent. The generator's
+		 * wait_for_receiver looks up the new flist by parent_ndx in
+		 * the shared chain. */
+		flist = recv_file_list(f_in, ndx);
+		flist->parent_ndx = ndx;
+		write_int(f_out, ndx);
+		io_flush(NORMAL_FLUSH);
+#else
 		/* Send all the data we read for this flist to the generator. */
 		start_flist_forward(ndx);
 		flist = recv_file_list(f_in, ndx);
 		flist->parent_ndx = ndx;
 		stop_flist_forward();
+#endif
 	}
 
 	iflags = protocol_version >= 29 ? read_shortint(f_in)

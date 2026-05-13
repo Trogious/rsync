@@ -99,12 +99,15 @@ BOOL set_dparams(int syntax_check_only)
     return 1;
 }
 
-int  daemon_chmod_modes(struct file_struct *file, mode_t *modep,
-                        int omit_dir_changes)
-{
-    (void)file; (void)modep; (void)omit_dir_changes;
-    return 0;
-}
+/* daemon_chmod_modes is a *pointer* (struct chmod_mode_struct *) on the
+ * daemon-side code path — NOT a function. rsync.c::set_file_attrs reads
+ * it as `if (daemon_chmod_modes && !S_ISLNK(...)) new_mode =
+ * tweak_mode(new_mode, daemon_chmod_modes);`. An earlier version of this
+ * stub defined it as a function, which made the linker take the function
+ * address — a non-NULL pointer — and pass it as a struct ptr to
+ * tweak_mode. tweak_mode then read garbage from the function's machine
+ * code as the chmod_mode_struct fields and crashed. */
+struct chmod_mode_struct *daemon_chmod_modes = NULL;
 
 int  namecvt_call(const char *cmd, const char **name_p, id_t *id_p)
 {

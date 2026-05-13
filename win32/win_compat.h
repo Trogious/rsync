@@ -197,6 +197,39 @@ static __inline struct tm *win_localtime_r(const time_t *t, struct tm *out)
  * GetFileAttributesA elsewhere in win_fs.c. */
 #define lstat(path, buf) stat((path), (buf))
 
+/* utime() shim — MSVC's _utime() doesn't work on directories; rsync
+ * tries to set times on the destination dir during pull and fails with
+ * EACCES. Route through CreateFile + SetFileTime with FILE_FLAG_BACKUP_
+ * SEMANTICS, which works for both files and directories. */
+struct utimbuf {
+    time_t actime;     /* access time */
+    time_t modtime;    /* modification time */
+};
+static __inline int win_utime_shim(const char *path, const struct utimbuf *buf)
+{
+    HANDLE h = CreateFileA(path,
+                           FILE_WRITE_ATTRIBUTES,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL,
+                           OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS,
+                           NULL);
+    if (h == INVALID_HANDLE_VALUE) { errno = ENOENT; return -1; }
+    FILETIME atime, mtime;
+    unsigned long long a_ticks = ((unsigned long long)buf->actime  + 11644473600ULL) * 10000000ULL;
+    unsigned long long m_ticks = ((unsigned long long)buf->modtime + 11644473600ULL) * 10000000ULL;
+    atime.dwLowDateTime  = (DWORD)(a_ticks & 0xFFFFFFFFULL);
+    atime.dwHighDateTime = (DWORD)(a_ticks >> 32);
+    mtime.dwLowDateTime  = (DWORD)(m_ticks & 0xFFFFFFFFULL);
+    mtime.dwHighDateTime = (DWORD)(m_ticks >> 32);
+    BOOL ok = SetFileTime(h, NULL, &atime, &mtime);
+    CloseHandle(h);
+    if (!ok) { errno = EACCES; return -1; }
+    return 0;
+}
+#define utime(p, b) win_utime_shim((p), (b))
+#define HAVE_STRUCT_UTIMBUF 1
+
 /* select() — winsock's version only handles SOCKETs, but rsync's io.c
  * calls select() on pipe fds returned by piped_child / win_spawn. Route
  * through our shim in win32/win_select.c, which classifies each fd
@@ -227,6 +260,24 @@ int win_select(int nfds, fd_set *readfds, fd_set *writefds,
  * Errors return (pid_t)-1 with errno set. */
 typedef int (*win_thread_main_t)(void *arg);
 pid_t win_thread_fork(win_thread_main_t fn, void *arg);
+
+/* Install a SetUnhandledExceptionFilter that logs the crash code +
+ * thread id to recv-trace.log. Call once at startup; useful for
+ * diagnosing thread-related crashes that bypass exit_cleanup. */
+void win_install_crash_handler(void);
+
+/* iobuf.in transfer across do_recv thread boundary. Forward declaration
+ * here so do_recv (which lives in main.c) can pass a snapshot blob to
+ * the receiver thread. See io.c::iobuf_snapshot_in_state for the
+ * full description. */
+struct iobuf_in_snapshot {
+    char  *bytes;
+    size_t len;
+    size_t raw_input_ends_offset;
+    int    in_multiplexed;
+};
+void iobuf_snapshot_in_state(struct iobuf_in_snapshot *snap);
+void iobuf_restore_in_state(struct iobuf_in_snapshot *snap);
 
 /* POSIX permission bits — MSVC's sys/stat.h has _S_IREAD/_S_IWRITE/
  * _S_IEXEC for owner only. Define the rest as zero (Windows ACLs

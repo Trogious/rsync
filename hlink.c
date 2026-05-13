@@ -38,7 +38,7 @@ extern int stdout_format_has_i;
 extern int maybe_ATTRS_REPORT;
 extern int unsort_ndx;
 extern char *basis_dir[MAX_BASIS_DIRS+1];
-extern struct file_list *cur_flist;
+extern ROLE_TLS struct file_list *cur_flist;
 
 #ifdef SUPPORT_HARD_LINKS
 
