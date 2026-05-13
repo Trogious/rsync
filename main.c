@@ -2007,6 +2007,18 @@ int main(int argc,char *argv[])
 	int ret;
 
 #ifdef WIN32_NATIVE
+	/* MSVC CRT opens stdin/stdout in text mode by default, which would
+	 * mangle the rsync binary protocol (\n becomes \r\n on write,
+	 * \r\n becomes \n on read). When we're invoked as a server child
+	 * via local_child's CreateProcessA, our stdin/stdout ARE the
+	 * protocol pipes — flip them to binary now, before anything
+	 * touches them. Harmless when run interactively (we don't write
+	 * to stdout unless we're talking the protocol). */
+	{
+		extern int __cdecl _setmode(int _FileHandle, int _Mode);
+		_setmode(0, 0x8000 /* _O_BINARY */);
+		_setmode(1, 0x8000 /* _O_BINARY */);
+	}
 	win_install_crash_handler();
 #endif
 
