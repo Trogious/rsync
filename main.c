@@ -1047,6 +1047,12 @@ struct do_recv_args {
 	int               snap_acls_ndx;
 	int               snap_xattrs_ndx;
 	int               snap_unsort_ndx;
+	/* am_server / am_sender are ROLE_TLS; inherit so rwrite() in the
+	 * receiver thread knows it's the server side and routes log
+	 * messages through send_msg() instead of writing directly to
+	 * stdout (which is the protocol pipe on a local-child spawn). */
+	int               snap_am_server;
+	int               snap_am_sender;
 #endif
 };
 
@@ -1079,17 +1085,20 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 #endif
 	int f_out;
 
-	am_receiver = 1;
-	send_msgs_to_gen = am_server;
-
 #ifdef WIN32_NATIVE
 	/* Inherit the parent's ROLE_TLS flist navigation state. dir_flist
-	 * is shared (not TLS), so it's already visible. */
+	 * is shared (not TLS), so it's already visible. am_server must be
+	 * inherited BEFORE we compute send_msgs_to_gen below, otherwise
+	 * rwrite() sees am_server=0 in this thread and falls through to
+	 * a direct fwrite(stdout, ...) — which on a child rsync.exe is
+	 * the parent's protocol pipe, garbling the multiplex stream. */
 	if (args) {
 		first_flist     = args->snap_first_flist;
 		cur_flist       = args->snap_cur_flist;
 		file_total      = args->snap_file_total;
 		flist_cnt       = args->snap_flist_cnt;
+		am_server       = args->snap_am_server;
+		am_sender       = args->snap_am_sender;
 		file_extra_cnt  = args->snap_file_extra_cnt;
 		pathname_ndx    = args->snap_pathname_ndx;
 		depth_ndx       = args->snap_depth_ndx;
@@ -1102,6 +1111,9 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 		unsort_ndx      = args->snap_unsort_ndx;
 	}
 #endif
+
+	am_receiver = 1;
+	send_msgs_to_gen = am_server;
 
 	/* We can't let two processes write to the socket at one time. */
 	io_end_multiplex_out(MPLX_SWITCHING);
@@ -1324,6 +1336,8 @@ static int do_recv(int f_in, int f_out, char *local_name)
 			args->snap_acls_ndx       = acls_ndx;
 			args->snap_xattrs_ndx     = xattrs_ndx;
 			args->snap_unsort_ndx     = unsort_ndx;
+			args->snap_am_server      = am_server;
+			args->snap_am_sender      = am_sender;
 			pid = win_thread_fork(do_recv_thread_main, args);
 			if (pid == (pid_t)-1) {
 				free(args->iobuf_in_snap.bytes);
