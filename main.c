@@ -1174,23 +1174,17 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 #ifdef WIN32_NATIVE
 		/* The POSIX flow blocks the receiver in read_final_goodbye
 		 * until the parent sends SIGUSR2 — that mechanism doesn't
-		 * apply to us (threads in one process).
-		 *
-		 * To tell the generator we're done, close our end of the
-		 * error pipe. The generator is blocked in wait_for_receiver
-		 * → read_int(error_pipe[0]); when our write end closes (and
-		 * since we share the process fd table, this actually closes
-		 * the fd) the read returns EOF, which whine_about_eof maps
-		 * to exit_cleanup, ending the wait cleanly.
-		 *
-		 * KNOWN ISSUE: the generator's late-shutdown loop wants
-		 * msgdone_cnt to reach a value our receiver doesn't always
-		 * write; it then sees EOF on the pipe and exits with
-		 * RERR_STREAMIO (12). Files transfer byte-exact regardless,
-		 * but exit code is non-zero. A clean fix requires either
-		 * detecting receiver-thread exit in the generator's wait
-		 * loop (instead of treating EOF as a protocol error), or
-		 * forwarding more end-of-stream messages from receiver. */
+		 * apply to us (threads in one process). On Windows we send
+		 * an extra NDX_DONE through error_pipe_w so the generator's
+		 * "while (msgdone_cnt == 3) wait_for_receiver()" loop at the
+		 * bottom of generate_files() unblocks cleanly — without it
+		 * the generator hits EOF on the pipe (kluge_around_eof maps
+		 * that to exit(0), skipping the final NDX_DONE write to the
+		 * sender, which then sees the pipe close mid-protocol and
+		 * exits 12). Then close our write end so the generator sees
+		 * EOF on its next read. */
+		write_int(f_out, NDX_DONE);
+		io_flush(FULL_FLUSH);
 		close(error_pipe_w);
 		return 0;
 #else
@@ -1426,9 +1420,13 @@ static int do_recv(int f_in, int f_out, char *local_name)
 	wait_process_with_flush(pid, &exit_code);
 
 #ifdef WIN32_NATIVE
-	/* Now safe to release the fds we kept open while the receiver thread
-	 * was running. */
-	close(error_pipe[1]);
+	/* On Windows the receiver thread already closed error_pipe_w
+	 * (= error_pipe[1] in our fd table — we share it across threads)
+	 * before exiting. Closing it again triggers MSVC's _close()
+	 * validation, which on a stale fd reports the error AND tears down
+	 * the process with STATUS_STACK_BUFFER_OVERRUN (0xc0000409, exit
+	 * code 9 in the low byte). Skip the redundant close here; the
+	 * generator's error_pipe[0] is still ours to clean up. */
 	close(error_pipe[0]);
 #else
 	close(error_pipe[0]);

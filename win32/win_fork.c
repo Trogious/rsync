@@ -207,7 +207,13 @@ pid_t win_waitpid(pid_t pid, int *statusp, int options)
     }
     if (wr == WAIT_OBJECT_0) {
         DWORD code = 0;
-        GetExitCodeProcess(h, &code);
+        /* The HANDLE in our table can be a process handle (from
+         * win_spawn_remote_shell / win_fork) OR a thread handle (from
+         * win_thread_fork). GetExitCodeProcess fails silently on a
+         * thread handle and vice versa, leaving code untouched. Try
+         * thread first; fall back to process. */
+        if (!GetExitCodeThread(h, &code))
+            GetExitCodeProcess(h, &code);
         if (statusp) {
             /* POSIX W_EXITCODE layout: (exit << 8) | (signal & 0x7f).
              * We don't have signals; just encode the exit code. */

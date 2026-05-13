@@ -180,21 +180,52 @@ static pid_t spawn_local_rsync_child(char **argv, int *f_in, int *f_out)
 	SetHandleInformation(parent_out_w, HANDLE_FLAG_INHERIT, 0);
 
 	{
-		/* Inline cmdline build (no quoting needed for our own args
-		 * since they're already shell-escaped by server_options). */
+		/* Build the CreateProcessA cmdline, applying the Windows
+		 * argv-quoting rules (CommandLineToArgvW semantics):
+		 *   * wrap each arg in double quotes
+		 *   * a run of N backslashes followed by a " is interpreted
+		 *     as N/2 literal backslashes + an escaped/closing quote,
+		 *     so we have to double the backslash count before any "
+		 *     inside the arg AND before the closing ".
+		 * Without this, a trailing-backslash path like
+		 *   C:\Users\Trog\Temp\foo\
+		 * wrapped naively as "C:\Users\Trog\Temp\foo\" reads the
+		 * final \" as an escaped quote and the parser bleeds into the
+		 * next argument. */
 		size_t total = 0;
 		int i;
 		for (i = 0; i < new_argc; i++)
-			total += strlen(new_argv[i]) + 3; /* room for quotes + space */
+			total += strlen(new_argv[i]) * 2 + 4; /* worst-case: every char doubled + quotes + space */
 		cmdline = (char *)malloc(total + 1);
 		if (!cmdline) { errno = ENOMEM; goto fail; }
-		cmdline[0] = '\0';
+		char *p = cmdline;
 		for (i = 0; i < new_argc; i++) {
-			if (i > 0) strcat(cmdline, " ");
-			strcat(cmdline, "\"");
-			strcat(cmdline, new_argv[i]);
-			strcat(cmdline, "\"");
+			if (i > 0) *p++ = ' ';
+			*p++ = '"';
+			int backslashes = 0;
+			for (const char *c = new_argv[i]; *c; c++) {
+				if (*c == '\\') {
+					backslashes++;
+					continue;
+				}
+				if (*c == '"') {
+					/* double the run of backslashes, then escape " */
+					while (backslashes-- > 0) { *p++ = '\\'; *p++ = '\\'; }
+					backslashes = 0;
+					*p++ = '\\';
+					*p++ = '"';
+					continue;
+				}
+				/* flush any pending backslashes verbatim */
+				while (backslashes-- > 0) *p++ = '\\';
+				backslashes = 0;
+				*p++ = *c;
+			}
+			/* trailing backslashes need doubling before the closing " */
+			while (backslashes-- > 0) { *p++ = '\\'; *p++ = '\\'; }
+			*p++ = '"';
 		}
+		*p = '\0';
 	}
 
 	{
