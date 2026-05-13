@@ -36,8 +36,8 @@ extern int dry_run;
 extern int list_only;
 extern int io_timeout;
 extern int am_root;
-extern int am_server;
-extern int am_sender;
+extern ROLE_TLS int am_server;
+extern ROLE_TLS int am_sender;
 extern int am_daemon;
 extern int inc_recurse;
 extern int blocking_io;
@@ -659,7 +659,32 @@ static pid_t do_cmd(char *cmd, char *machine, char *user, char **remote_argv, in
 		if (whole_file < 0 && !write_batch)
 			whole_file = 1;
 		set_allow_inc_recurse();
+#ifdef WIN32_NATIVE
+		/* On Windows local_child spawns a fresh rsync.exe subprocess
+		 * (CreateProcessA — fork would deadlock + setup_protocol can't
+		 * be run concurrently in two threads). The subprocess restarts
+		 * main() and parses argv, so we have to hand it the same
+		 * --server/--sender/... option set that the SSH path produces
+		 * via server_options(). The args[] slot at index 0 is reserved
+		 * for the exe path that pipe.c will fill in. */
+		{
+			int local_argc = 0;
+			char *local_args[MAX_ARGS];
+			local_args[local_argc++] = "rsync"; /* argv[0] placeholder; pipe.c overrides */
+			server_options(local_args, &local_argc);
+			if (local_argc >= MAX_ARGS - 2 - argc) {
+				rprintf(FERROR, "internal: local_args overflow\n");
+				exit_cleanup(RERR_SYNTAX);
+			}
+			/* Append the path args that the original args[] held. */
+			for (i = 0; i < argc; i++)
+				local_args[local_argc++] = args[i];
+			local_args[local_argc] = NULL;
+			pid = local_child(local_argc, local_args, f_in_p, f_out_p, child_main);
+		}
+#else
 		pid = local_child(argc, args, f_in_p, f_out_p, child_main);
+#endif
 #ifdef ICONV_CONST
 		setup_iconv();
 #endif
@@ -1008,6 +1033,20 @@ struct do_recv_args {
 	struct file_list *snap_cur_flist;
 	int               snap_file_total;
 	int               snap_flist_cnt;
+	/* Snapshot of the file_extra_cnt + *_ndx indices that setup_protocol
+	 * sets up. These are ROLE_TLS for the local_child case (sender +
+	 * server-receiver run as sibling threads, each calls setup_protocol);
+	 * the do_recv receiver thread inherits them rather than recomputing. */
+	int               snap_file_extra_cnt;
+	int               snap_pathname_ndx;
+	int               snap_depth_ndx;
+	int               snap_atimes_ndx;
+	int               snap_crtimes_ndx;
+	int               snap_uid_ndx;
+	int               snap_gid_ndx;
+	int               snap_acls_ndx;
+	int               snap_xattrs_ndx;
+	int               snap_unsort_ndx;
 #endif
 };
 
@@ -1047,10 +1086,20 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 	/* Inherit the parent's ROLE_TLS flist navigation state. dir_flist
 	 * is shared (not TLS), so it's already visible. */
 	if (args) {
-		first_flist = args->snap_first_flist;
-		cur_flist   = args->snap_cur_flist;
-		file_total  = args->snap_file_total;
-		flist_cnt   = args->snap_flist_cnt;
+		first_flist     = args->snap_first_flist;
+		cur_flist       = args->snap_cur_flist;
+		file_total      = args->snap_file_total;
+		flist_cnt       = args->snap_flist_cnt;
+		file_extra_cnt  = args->snap_file_extra_cnt;
+		pathname_ndx    = args->snap_pathname_ndx;
+		depth_ndx       = args->snap_depth_ndx;
+		atimes_ndx      = args->snap_atimes_ndx;
+		crtimes_ndx     = args->snap_crtimes_ndx;
+		uid_ndx         = args->snap_uid_ndx;
+		gid_ndx         = args->snap_gid_ndx;
+		acls_ndx        = args->snap_acls_ndx;
+		xattrs_ndx      = args->snap_xattrs_ndx;
+		unsort_ndx      = args->snap_unsort_ndx;
 	}
 #endif
 
@@ -1261,6 +1310,20 @@ static int do_recv(int f_in, int f_out, char *local_name)
 			args->snap_cur_flist   = cur_flist;
 			args->snap_file_total  = file_total;
 			args->snap_flist_cnt   = flist_cnt;
+			/* file_extra_cnt and the index variables are ROLE_TLS too,
+			 * set by setup_protocol() in the main thread before the
+			 * thread split. Forward them so file_struct extras are
+			 * indexed consistently on both sides. */
+			args->snap_file_extra_cnt = file_extra_cnt;
+			args->snap_pathname_ndx   = pathname_ndx;
+			args->snap_depth_ndx      = depth_ndx;
+			args->snap_atimes_ndx     = atimes_ndx;
+			args->snap_crtimes_ndx    = crtimes_ndx;
+			args->snap_uid_ndx        = uid_ndx;
+			args->snap_gid_ndx        = gid_ndx;
+			args->snap_acls_ndx       = acls_ndx;
+			args->snap_xattrs_ndx     = xattrs_ndx;
+			args->snap_unsort_ndx     = unsort_ndx;
 			pid = win_thread_fork(do_recv_thread_main, args);
 			if (pid == (pid_t)-1) {
 				free(args->iobuf_in_snap.bytes);

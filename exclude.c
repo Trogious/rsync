@@ -23,8 +23,8 @@
 #include "rsync.h"
 #include "ifuncs.h"
 
-extern int am_server;
-extern int am_sender;
+extern ROLE_TLS int am_server;
+extern ROLE_TLS int am_sender;
 extern ROLE_TLS int am_generator;
 extern int eol_nulls;
 extern int io_error;

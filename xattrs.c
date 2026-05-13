@@ -28,7 +28,7 @@
 
 extern int dry_run;
 extern int am_root;
-extern int am_sender;
+extern ROLE_TLS int am_sender;
 extern ROLE_TLS int am_generator;
 extern int read_only;
 extern int list_only;

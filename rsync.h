@@ -837,16 +837,17 @@ struct file_struct {
 #endif
 };
 
-extern int file_extra_cnt;
+extern ROLE_TLS int file_extra_cnt;
 extern int inc_recurse;
-extern int atimes_ndx;
-extern int crtimes_ndx;
-extern int pathname_ndx;
-extern int depth_ndx;
-extern int uid_ndx;
-extern int gid_ndx;
-extern int acls_ndx;
-extern int xattrs_ndx;
+extern ROLE_TLS int atimes_ndx;
+extern ROLE_TLS int crtimes_ndx;
+extern ROLE_TLS int pathname_ndx;
+extern ROLE_TLS int depth_ndx;
+extern ROLE_TLS int uid_ndx;
+extern ROLE_TLS int gid_ndx;
+extern ROLE_TLS int acls_ndx;
+extern ROLE_TLS int xattrs_ndx;
+extern ROLE_TLS int unsort_ndx;
 extern int file_sum_extra_cnt;
 
 #ifdef USE_FLEXIBLE_ARRAY

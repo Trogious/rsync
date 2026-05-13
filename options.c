@@ -88,13 +88,15 @@ int do_compression = 0;
 int do_compression_level = CLVL_NOT_SPECIFIED;
 int do_compression_threads = 0; /*n = 0 use rsync thread, n >= 1 spawn n threads for compression */
 int am_root = 0; /* 0 = normal, 1 = root, 2 = --super, -1 = --fake-super */
-/* NOTE: am_server / am_sender are NOT ROLE_TLS even though local_child's
- * child branch flips them. MSVC forbids __declspec(thread) variables in
- * static initializers (long_options[] takes &am_server). When we get to
- * local_child's thread refactor we'll need a different mechanism (e.g.
- * a per-thread accessor) for these two. */
-int am_server = 0;
-int am_sender = 0;
+/* am_server / am_sender diverge between parent + child threads on Windows
+ * (parent is the local sender, child is the server). They're ROLE_TLS so
+ * each thread has its own view. popt can't take the address of a TLS var
+ * in a static initializer, so the popt table writes to popt_am_server_arg
+ * (shared) and parse_arguments() copies that into am_server (TLS) for the
+ * current thread. */
+ROLE_TLS int am_server = 0;
+ROLE_TLS int am_sender = 0;
+static int popt_am_server_arg = 0;
 int am_starting_up = 1;
 int relative_paths = -1;
 int implied_dirs = 1;
@@ -868,7 +870,7 @@ static const struct poptOption long_daemon_options[] = {
   {"port",             0,  POPT_ARG_INT,    &rsync_port, 0, 0, 0 },
   {"sockopts",         0,  POPT_ARG_STRING, &sockopts, 0, 0, 0 },
   {"protocol",         0,  POPT_ARG_INT,    &protocol_version, 0, 0, 0 },
-  {"server",           0,  POPT_ARG_NONE,   &am_server, 0, 0, 0 },
+  {"server",           0,  POPT_ARG_NONE,   &popt_am_server_arg, 0, 0, 0 },
   {"temp-dir",        'T', POPT_ARG_STRING, &tmpdir, 0, 0, 0 },
   {"verbose",         'v', POPT_ARG_NONE,   0, 'v', 0, 0 },
   {"no-verbose",       0,  POPT_ARG_VAL,    &verbose, 0, 0, 0 },
@@ -1367,6 +1369,10 @@ int parse_arguments(int *argc_p, const char ***argv_p)
 		return 0;
 	}
 
+	/* Hand the TLS am_server into popt's shared stub so the option-table
+	 * write/read sees the calling thread's current value. */
+	popt_am_server_arg = am_server;
+
 	set_refuse_options();
 
 #ifdef ICONV_OPTION
@@ -1498,6 +1504,11 @@ int parse_arguments(int *argc_p, const char ***argv_p)
 			am_starting_up = 0;
 			daemon_opt = 0;
 			am_daemon = 1;
+			/* Propagate any --server flag parsed from long_daemon_options
+			 * (which writes to the shared popt_am_server_arg stub because
+			 * MSVC won't let popt take the address of a TLS variable in a
+			 * static initializer). */
+			am_server = popt_am_server_arg;
 			return 1;
 
 		case OPT_MODIFY_WINDOW:

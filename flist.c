@@ -27,9 +27,9 @@
 #include "io.h"
 
 extern int am_root;
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int am_daemon;
-extern int am_sender;
+extern ROLE_TLS int am_sender;
 extern ROLE_TLS int am_generator;
 extern ROLE_TLS int am_receiver;
 extern int inc_recurse;
@@ -56,8 +56,8 @@ extern int preserve_specials;
 extern int delete_during;
 extern int missing_args;
 extern int eol_nulls;
-extern int atimes_ndx;
-extern int crtimes_ndx;
+extern ROLE_TLS int atimes_ndx;
+extern ROLE_TLS int crtimes_ndx;
 extern int relative_paths;
 extern int implied_dirs;
 extern int ignore_perishable;
@@ -74,7 +74,7 @@ extern int sender_symlink_iconv;
 extern ROLE_TLS int output_needs_newline;
 extern int sender_keeps_checksum;
 extern int trust_sender_filter;
-extern int unsort_ndx;
+extern ROLE_TLS int unsort_ndx;
 extern uid_t our_uid;
 extern struct stats stats;
 extern char *filesfrom_host;

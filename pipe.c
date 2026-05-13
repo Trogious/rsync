@@ -22,8 +22,8 @@
 
 #include "rsync.h"
 
-extern int am_sender;
-extern int am_server;
+extern ROLE_TLS int am_sender;
+extern ROLE_TLS int am_server;
 extern int blocking_io;
 extern int filesfrom_fd;
 extern int munge_symlinks;
@@ -120,6 +120,149 @@ pid_t piped_child(char **command, int *f_in, int *f_out)
  * child, the STDIN and STDOUT file descriptors refer to these
  * sockets.  In the parent, the function arguments f_in and f_out are
  * set to refer to these sockets. */
+#ifdef WIN32_NATIVE
+/* Windows variant: spawn rsync.exe as a subprocess (via CreateProcessA)
+ * instead of forking. Two reasons rule out the thread + TLS treatment
+ * that worked for do_recv:
+ *   1. fork-via-RtlCloneUserProcess deadlocks here, just like do_recv.
+ *   2. local_child's "child" branch runs setup_protocol(), which mutates
+ *      a large amount of shared global state (compat_flags, file_extra_cnt,
+ *      negotiated checksum/compression, ...). Running it concurrently in
+ *      two threads of the same process races and crashes.
+ * A separate process gives us the same process-level isolation POSIX gets
+ * from fork(), at the cost of one extra exec + arg-passing round-trip. */
+
+/* Spawn rsync.exe as a subprocess to serve as the local "child" — this
+ * sidesteps the thread + shared-state issues that would arise from running
+ * setup_protocol() concurrently in two threads sharing globals. The child
+ * inherits the parent's filesystem view and parses --server itself. */
+static pid_t spawn_local_rsync_child(char **argv, int *f_in, int *f_out)
+{
+	HANDLE parent_in_r = NULL, parent_in_w = NULL;
+	HANDLE parent_out_r = NULL, parent_out_w = NULL;
+	SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+	char self_path[MAX_PATH];
+	char **new_argv = NULL;
+	char *cmdline = NULL;
+	int new_argc = 0;
+	pid_t pid = (pid_t)-1;
+
+	if (GetModuleFileNameA(NULL, self_path, MAX_PATH) == 0 ||
+	    GetModuleFileNameA(NULL, self_path, MAX_PATH) == MAX_PATH) {
+		errno = ENOENT;
+		return (pid_t)-1;
+	}
+
+	/* Build a new argv whose argv[0] points at our own exe path. The
+	 * caller's argv[0] is typically "rsync" without a path. */
+	{
+		int i, count = 0;
+		while (argv[count])
+			count++;
+		new_argv = (char **)malloc(sizeof(char *) * (count + 1));
+		if (!new_argv) { errno = ENOMEM; return (pid_t)-1; }
+		new_argv[new_argc++] = self_path;
+		for (i = 1; i < count; i++)
+			new_argv[new_argc++] = argv[i];
+		new_argv[new_argc] = NULL;
+	}
+
+	if (!CreatePipe(&parent_in_r, &parent_in_w, &sa, 1 << 20)) {
+		errno = EIO;
+		goto fail;
+	}
+	SetHandleInformation(parent_in_r, HANDLE_FLAG_INHERIT, 0);
+
+	if (!CreatePipe(&parent_out_r, &parent_out_w, &sa, 1 << 20)) {
+		errno = EIO;
+		goto fail;
+	}
+	SetHandleInformation(parent_out_w, HANDLE_FLAG_INHERIT, 0);
+
+	{
+		/* Inline cmdline build (no quoting needed for our own args
+		 * since they're already shell-escaped by server_options). */
+		size_t total = 0;
+		int i;
+		for (i = 0; i < new_argc; i++)
+			total += strlen(new_argv[i]) + 3; /* room for quotes + space */
+		cmdline = (char *)malloc(total + 1);
+		if (!cmdline) { errno = ENOMEM; goto fail; }
+		cmdline[0] = '\0';
+		for (i = 0; i < new_argc; i++) {
+			if (i > 0) strcat(cmdline, " ");
+			strcat(cmdline, "\"");
+			strcat(cmdline, new_argv[i]);
+			strcat(cmdline, "\"");
+		}
+	}
+
+	{
+		STARTUPINFOA si = { sizeof(si) };
+		PROCESS_INFORMATION pi = { 0 };
+		si.dwFlags = STARTF_USESTDHANDLES;
+		si.hStdInput  = parent_out_r;
+		si.hStdOutput = parent_in_w;
+		si.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
+
+		if (!CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0,
+		                    NULL, NULL, &si, &pi)) {
+			DWORD e = GetLastError();
+			errno = (e == ERROR_FILE_NOT_FOUND) ? ENOENT : EIO;
+			goto fail;
+		}
+
+		CloseHandle(parent_out_r); parent_out_r = NULL;
+		CloseHandle(parent_in_w);  parent_in_w  = NULL;
+		CloseHandle(pi.hThread);
+
+		*f_in  = _open_osfhandle((intptr_t)parent_in_r,  _O_BINARY);
+		*f_out = _open_osfhandle((intptr_t)parent_out_w, _O_BINARY);
+		if (*f_in < 0 || *f_out < 0) {
+			if (*f_in  < 0) CloseHandle(parent_in_r);
+			if (*f_out < 0) CloseHandle(parent_out_w);
+			CloseHandle(pi.hProcess);
+			errno = EMFILE;
+			goto fail;
+		}
+
+		win_register_external_child(pi.dwProcessId, pi.hProcess);
+		pid = (pid_t)pi.dwProcessId;
+	}
+
+	free(new_argv);
+	free(cmdline);
+	return pid;
+
+fail:
+	if (parent_in_r) CloseHandle(parent_in_r);
+	if (parent_in_w) CloseHandle(parent_in_w);
+	if (parent_out_r) CloseHandle(parent_out_r);
+	if (parent_out_w) CloseHandle(parent_out_w);
+	free(new_argv);
+	free(cmdline);
+	return (pid_t)-1;
+}
+
+pid_t local_child(int argc, char **argv, int *f_in, int *f_out,
+		  int (*child_main)(int, char*[]))
+{
+	pid_t pid;
+
+	/* The parent process is always the sender for a local rsync. */
+	assert(am_sender);
+
+	(void)argc;
+	(void)child_main;
+
+	pid = spawn_local_rsync_child(argv, f_in, f_out);
+	if (pid == (pid_t)-1) {
+		rsyserr(FERROR, errno, "spawn_local_rsync_child");
+		exit_cleanup(RERR_IPC);
+	}
+	return pid;
+}
+#else
 pid_t local_child(int argc, char **argv, int *f_in, int *f_out,
 		  int (*child_main)(int, char*[]))
 {
@@ -190,3 +333,4 @@ pid_t local_child(int argc, char **argv, int *f_in, int *f_out,
 
 	return pid;
 }
+#endif

@@ -37,8 +37,8 @@
 extern int bwlimit;
 extern size_t bwlimit_writemax;
 extern int io_timeout;
-extern int am_server;
-extern int am_sender;
+extern ROLE_TLS int am_server;
+extern ROLE_TLS int am_sender;
 extern ROLE_TLS int am_receiver;
 extern ROLE_TLS int am_generator;
 extern int local_server;

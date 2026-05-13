@@ -23,8 +23,8 @@
 #include "itypes.h"
 #include "ifuncs.h"
 
-extern int am_server;
-extern int am_sender;
+extern ROLE_TLS int am_server;
+extern ROLE_TLS int am_sender;
 extern int local_server;
 extern int inplace;
 extern int recurse;
@@ -73,7 +73,13 @@ extern struct name_num_obj valid_checksums, valid_auth_checksums;
 extern struct name_num_item *xfer_sum_nni;
 
 int remote_protocol = 0;
-int file_extra_cnt = 0; /* count of file-list extras that everyone gets */
+/* file_extra_cnt + the *_ndx indices below are per-side state computed by
+ * setup_protocol(). On Windows the sender + server-receiver run as sibling
+ * threads, each calling setup_protocol on its own f_in/f_out pair — they
+ * each need their own copy (POSIX gets this via fork()). Both threads parse
+ * the same options so they compute the same values and read the same
+ * file-list extras coherently. */
+ROLE_TLS int file_extra_cnt = 0; /* count of file-list extras that everyone gets */
 int inc_recurse = 0;
 int compat_flags = 0;
 int use_safe_inc_flist = 0;
@@ -86,8 +92,9 @@ int xmit_id0_names = 0;
 struct name_num_item *xattr_sum_nni;
 int xattr_sum_len = 0;
 
-/* These index values are for the file-list's extra-attribute array. */
-int pathname_ndx, depth_ndx, atimes_ndx, crtimes_ndx, uid_ndx, gid_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
+/* These index values are for the file-list's extra-attribute array.
+ * ROLE_TLS for the same reason as file_extra_cnt above. */
+ROLE_TLS int pathname_ndx, depth_ndx, atimes_ndx, crtimes_ndx, uid_ndx, gid_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
 
 int receiver_symlink_times = 0; /* receiver can set the time on a symlink */
 int sender_symlink_iconv = 0;	/* sender should convert symlink content */

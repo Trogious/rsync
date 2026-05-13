@@ -25,7 +25,7 @@
 extern int dry_run;
 extern int do_xfers;
 extern int am_root;
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int inc_recurse;
 extern int log_before_transfer;
 extern int stdout_format_has_i;

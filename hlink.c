@@ -26,7 +26,7 @@
 
 extern int dry_run;
 extern int list_only;
-extern int am_sender;
+extern ROLE_TLS int am_sender;
 extern int inc_recurse;
 extern int do_xfers;
 extern int alt_dest_type;
@@ -36,7 +36,7 @@ extern int protocol_version;
 extern int remove_source_files;
 extern int stdout_format_has_i;
 extern int maybe_ATTRS_REPORT;
-extern int unsort_ndx;
+extern ROLE_TLS int unsort_ndx;
 extern char *basis_dir[MAX_BASIS_DIRS+1];
 extern ROLE_TLS struct file_list *cur_flist;
 

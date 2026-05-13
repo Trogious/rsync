@@ -23,7 +23,7 @@
 #include "rsync.h"
 #include "inums.h"
 
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int flist_eof;
 extern int quiet;
 extern int need_unsorted_flist;

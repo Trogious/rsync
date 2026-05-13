@@ -23,10 +23,10 @@
 #include "rsync.h"
 
 extern int dry_run;
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int am_daemon;
 extern ROLE_TLS int am_receiver;
-extern int am_sender;
+extern ROLE_TLS int am_sender;
 extern int io_error;
 extern int keep_partial;
 extern int got_xfer_error;

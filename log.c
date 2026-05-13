@@ -25,8 +25,8 @@
 
 extern int dry_run;
 extern int am_daemon;
-extern int am_server;
-extern int am_sender;
+extern ROLE_TLS int am_server;
+extern ROLE_TLS int am_sender;
 extern ROLE_TLS int am_generator;
 extern int local_server;
 extern int quiet;

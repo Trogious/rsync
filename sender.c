@@ -23,7 +23,7 @@
 #include "inums.h"
 
 extern int do_xfers;
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int am_daemon;
 extern int local_server;
 extern int inc_recurse;

@@ -35,7 +35,7 @@
 # endif
 #endif
 
-extern int am_server;
+extern ROLE_TLS int am_server;
 extern int whole_file;
 extern int checksum_seed;
 extern int protocol_version;
