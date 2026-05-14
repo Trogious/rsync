@@ -4,8 +4,8 @@
 #   1. --version exits 0
 #   2. --help    exits 0
 #   3. Local-to-local copy round-trips a single file
-#   4. --daemon  exits with RERR_UNSUPPORTED (14)
-#   5. rsync://  exits with RERR_UNSUPPORTED (14)
+#   4. --daemon  exits with RERR_UNSUPPORTED (4)
+#   5. rsync://  exits with RERR_UNSUPPORTED (4)
 #
 # Does NOT test remote (SSH) transfers — that needs a Linux target.
 param([Parameter(Mandatory=$true)][string]$Binary)
@@ -43,7 +43,10 @@ if ($srcHash -ne $dstHash) {
 Remove-Item -Recurse -Force $src, $dst
 
 Write-Host '== --daemon rejected =='
-& $Binary --daemon 2>$null
+# PowerShell's $ErrorActionPreference = Stop turns native-command stderr
+# into a terminating error even with 2>$null in some shell versions.
+# Use cmd /c to keep rsync's stderr from tripping the PS error policy.
+cmd /c "`"$Binary`" --daemon 2>nul"
 if ($LASTEXITCODE -ne 4) {
     Write-Warning "Expected exit 4 (RERR_UNSUPPORTED) for --daemon, got $LASTEXITCODE"
 } else {
@@ -51,9 +54,9 @@ if ($LASTEXITCODE -ne 4) {
 }
 
 Write-Host '== rsync:// URL rejected =='
-& $Binary rsync://example.invalid/mod/path . 2>$null
-if ($LASTEXITCODE -ne 14) {
-    Write-Warning "Expected exit 14 (RERR_UNSUPPORTED) for rsync://, got $LASTEXITCODE"
+cmd /c "`"$Binary`" rsync://example.invalid/mod/path . 2>nul"
+if ($LASTEXITCODE -ne 4) {
+    Write-Warning "Expected exit 4 (RERR_UNSUPPORTED) for rsync://, got $LASTEXITCODE"
 } else {
     Write-Host 'OK: rsync:// -> RERR_UNSUPPORTED'
 }

@@ -2106,6 +2106,31 @@ int main(int argc,char *argv[])
 		option_error();
 		exit_cleanup(RERR_SYNTAX);
 	}
+#ifdef WIN32_NATIVE
+	/* rsync's internal path code assumes '/' as the separator.
+	 * When PowerShell hands us paths with backslashes (e.g.
+	 * "C:\Users\Trog\foo\"), the trailing '\' is taken as part of
+	 * the filename rather than a "transfer contents of directory"
+	 * marker, and intermediate '\' get split into bizarre subdirs.
+	 * Convert them up-front. Skip arguments that match parse_hostspec
+	 * (user@host:path) — those carry a remote path on the far side
+	 * of the ':' which rsync ships over the wire untouched. Drive
+	 * paths ("C:\...") and UNC paths ("\\server\share\...") are
+	 * recognised by check_for_hostspec() as local and reach the
+	 * normalize call. */
+	{
+		int i;
+		for (i = 0; i < argc; i++) {
+			char *host;
+			int port;
+			if (!argv[i])
+				continue;
+			if (check_for_hostspec(argv[i], &host, &port) && host)
+				continue;
+			win_normalize_path(argv[i]);
+		}
+	}
+#endif
 	if (write_batch
 	 && poptDupArgv(argc, (const char **)argv, &cooked_argc, (const char ***)&cooked_argv) != 0)
 		out_of_memory("main");
