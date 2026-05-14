@@ -44,6 +44,11 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MSYS
+          # release: false means "install into the runner's pre-existing
+          # MSYS2 at C:\msys64", not into a fresh tree under RUNNER_TEMP.
+          # scripts/build-windows.ps1 hard-codes C:\msys64\usr\bin\bash.exe,
+          # so we want our packages to land where that bash will find them.
+          release: false
           update: true
           # No `autotools` -- not an actual package in MSYS2's pacman
           # repo. Use the explicit names that provide aclocal /
