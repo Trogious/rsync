@@ -2031,7 +2031,6 @@ int main(int argc,char *argv[])
 		_setmode(0, 0x8000 /* _O_BINARY */);
 		_setmode(1, 0x8000 /* _O_BINARY */);
 	}
-	win_install_crash_handler();
 #endif
 
 	raw_argc = argc;

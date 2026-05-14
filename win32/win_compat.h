@@ -318,11 +318,6 @@ int win_select(int nfds, fd_set *readfds, fd_set *writefds,
 typedef int (*win_thread_main_t)(void *arg);
 pid_t win_thread_fork(win_thread_main_t fn, void *arg);
 
-/* Install a SetUnhandledExceptionFilter that logs the crash code +
- * thread id to recv-trace.log. Call once at startup; useful for
- * diagnosing thread-related crashes that bypass exit_cleanup. */
-void win_install_crash_handler(void);
-
 /* iobuf.in transfer across do_recv thread boundary. Forward declaration
  * here so do_recv (which lives in main.c) can pass a snapshot blob to
  * the receiver thread. See io.c::iobuf_snapshot_in_state for the

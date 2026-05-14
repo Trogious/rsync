@@ -66,7 +66,6 @@ aclocal.m4
 /vcpkg-install.log
 /util2-pp.log
 /rsync-trace.*
-/recv-trace.log
 /vcpkg/vcpkg_installed/
 *.obj
 # MSVC debug / linker outputs
