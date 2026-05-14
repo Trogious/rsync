@@ -1,0 +1,151 @@
+name: release-windows-native
+
+# Manual-only: fire from the Actions tab when you want to cut a release.
+# Builds rsync.exe from the win32-port branch (regardless of what branch
+# the user is sitting on -- the workflow checks out win32-port explicitly)
+# and publishes a tagged GitHub release containing a single .7z archive
+# with the binary, the rsync LICENSE, and a README.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for the release (e.g. win-v3.4.2-1). Created on the current win32-port HEAD if it does not already exist.'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the GitHub release as a pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout win32-port (with submodules and tags)
+        uses: actions/checkout@v4
+        with:
+          ref: win32-port
+          submodules: recursive
+          fetch-depth: 0      # need tag history for git describe in --version
+          fetch-tags: true
+
+      - name: Set up MSVC environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up MSYS2 (build-time shell only)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: true
+          install: >-
+            base-devel autotools make tar curl python git
+            patch sed gawk gperf bison flex texinfo
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\downloads
+          key: vcpkg-x64-windows-static-${{ hashFiles('vcpkg/vcpkg.json') }}
+
+      - name: Install vcpkg dependencies (static)
+        shell: pwsh
+        run: C:\vcpkg\vcpkg.exe install --triplet x64-windows-static --x-manifest-root=vcpkg
+
+      - name: Import gnulib modules
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/gnulib-import.sh
+          ./scripts/gnulib-import.sh
+
+      - name: Build rsync.exe
+        shell: pwsh
+        run: pwsh ./scripts/build-windows.ps1
+
+      - name: Verify static linkage
+        shell: pwsh
+        run: pwsh ./scripts/verify-static.ps1 rsync.exe
+
+      - name: Smoke test
+        shell: pwsh
+        run: pwsh ./scripts/smoke-test.ps1 -Binary rsync.exe
+
+      - name: Assemble release archive
+        shell: pwsh
+        run: |
+          $tag       = '${{ inputs.tag }}'
+          $version   = (& git describe --tags --always).Trim()
+          $commit    = (& git rev-parse --short=8 HEAD).Trim()
+          $buildDate = (Get-Date -Format 'yyyy-MM-dd')
+          $archive   = "rsync-native-${tag}-windows-x86_64.7z"
+
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item rsync.exe       stage\rsync.exe
+          Copy-Item COPYING         stage\LICENSE.txt
+
+          # Stamp the README with build metadata so a downloaded archive
+          # is self-describing.
+          $readme = Get-Content -Raw .github/release-README.md
+          $readme = $readme -replace '@@RELEASE_TAG@@',  $tag `
+                            -replace '@@VERSION@@',     $version `
+                            -replace '@@COMMIT@@',      $commit `
+                            -replace '@@BUILD_DATE@@',  $buildDate
+          Set-Content -Path stage\README.md -Value $readme -NoNewline
+
+          & 'C:\Program Files\7-Zip\7z.exe' a -mx=9 $archive .\stage\*
+          $sha = (Get-FileHash $archive -Algorithm SHA256).Hash
+          $sha | Out-File -Encoding ASCII "$archive.sha256"
+
+          "ARCHIVE=$archive"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VERSION=$version"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          "COMMIT=$commit"     | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsync-native-windows-x86_64
+          path: |
+            rsync-native-*-windows-x86_64.7z
+            rsync-native-*-windows-x86_64.7z.sha256
+
+      - name: Create / update tag on win32-port HEAD
+        shell: pwsh
+        run: |
+          $tag = '${{ inputs.tag }}'
+          git tag --force $tag
+          git push --force origin "refs/tags/$tag"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:    ${{ inputs.tag }}
+          name:        ${{ inputs.tag }}
+          prerelease:  ${{ inputs.prerelease }}
+          target_commitish: win32-port
+          body: |
+            Native Windows build of rsync (no Cygwin, no MSYS2 runtime).
+
+            **Source revision:** `${{ env.VERSION }}` (commit `${{ env.COMMIT }}`)
+            **Branch:** `win32-port`
+
+            ## Contents
+
+            - `rsync.exe` — single-file static binary, MSVC `/MT` CRT, all crypto/compression/iconv linked in.
+            - `LICENSE.txt` — rsync's GPLv3 license.
+            - `README.md` — capability list, modifications made for Windows, known limitations.
+
+            ## SHA256
+
+            See `${{ env.ARCHIVE }}.sha256` next to the archive.
+          files: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
