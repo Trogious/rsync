@@ -32,6 +32,7 @@ SHELL=/bin/sh
 
 ROLL_SIMD_x86_64=simd-checksum-x86_64.o
 ROLL_ASM_x86_64=simd-checksum-avx2.o
+ROLL_ASM_x86_64_win64=simd-checksum-avx2-win64.o
 MD5_ASM_x86_64=lib/md5-asm-x86_64.o
 
 GENFILES=configure.sh aclocal.m4 config.h.in rsync.1 rsync.1.html \
@@ -156,6 +157,12 @@ simd-checksum-x86_64.o: simd-checksum-x86_64.cpp
 
 simd-checksum-avx2.o: simd-checksum-avx2.S
 	@$(srcdir)/cmd-or-msg disable-roll-asm $(CC) $(CFLAGS) -I. @NOEXECSTACK@ -c -o $@ $(srcdir)/simd-checksum-avx2.S
+
+# MASM x64 assembler is invoked directly — it doesn't take any of cl.exe's
+# flags. @ROLL_ASM_AS@ resolves to `ml64 -nologo` on Windows, unused
+# elsewhere.
+simd-checksum-avx2-win64.o: simd-checksum-avx2-win64.asm
+	@ROLL_ASM_AS@ -c -Fo$@ $(srcdir)/simd-checksum-avx2-win64.asm
 
 lib/md5-asm-x86_64.o: lib/md5-asm-x86_64.S lib/md-defines.h
 	@$(srcdir)/cmd-or-msg disable-md5-asm $(CC) -I. @NOEXECSTACK@ -c -o $@ $(srcdir)/lib/md5-asm-x86_64.S

@@ -614,16 +614,30 @@ if test x"$ROLL_SIMD" = x""; then
     enable_roll_asm=no
 fi
 
+ROLL_ASM_AS=
 if test x"$enable_roll_asm" = x"yes"; then
     ROLL_ASM="$host_cpu"
-    AC_MSG_RESULT([yes ($ROLL_ASM)])
+    case "$host_os" in
+	*mingw* | *cygwin* | *windows*)
+	    # Windows: hand-translated MASM file, ABI-shuffled for Win64.
+	    # The upstream GAS .S file uses System V calling convention
+	    # and isn't accepted by cl.exe or ml64.exe.
+	    AC_MSG_RESULT([yes ($ROLL_ASM, win64)])
+	    ROLL_ASM='$(ROLL_ASM_'"$ROLL_ASM"'_win64)'
+	    ROLL_ASM_AS='ml64 -nologo'
+	    ;;
+	*)
+	    AC_MSG_RESULT([yes ($ROLL_ASM)])
+	    ROLL_ASM='$(ROLL_ASM_'"$ROLL_ASM)"
+	    ;;
+    esac
     AC_DEFINE(USE_ROLL_ASM, 1, [Define to 1 to enable rolling-checksum ASM optimizations (requires --enable-roll-simd)])
-    ROLL_ASM='$(ROLL_ASM_'"$ROLL_ASM)"
 else
     AC_MSG_RESULT(no)
 fi
 
 AC_SUBST(ROLL_ASM)
+AC_SUBST(ROLL_ASM_AS)
 
 AC_MSG_CHECKING([whether to enable xxhash checksum support])
 AC_ARG_ENABLE([xxhash],

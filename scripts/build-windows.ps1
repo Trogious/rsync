@@ -95,7 +95,8 @@ export am_cv_proto_iconv='extern size_t iconv (iconv_t cd, char * *inbuf, size_t
     --disable-xattr-support \
     --disable-md2man \
     --disable-locale \
-    --enable-roll-simd
+    --enable-roll-simd \
+    --enable-roll-asm
 
 make -j`$(nproc) rsync.exe
 "@
