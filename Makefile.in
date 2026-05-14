@@ -39,7 +39,8 @@ GENFILES=configure.sh aclocal.m4 config.h.in rsync.1 rsync.1.html \
 	 rsync-ssl.1 rsync-ssl.1.html rsyncd.conf.5 rsyncd.conf.5.html \
 	 @GEN_RRSYNC@
 HEADERS=byteorder.h config.h errcode.h proto.h rsync.h ifuncs.h itypes.h inums.h \
-	lib/pool_alloc.h lib/mdigest.h lib/md-defines.h
+	lib/pool_alloc.h lib/mdigest.h lib/md-defines.h \
+	@WIN32_HEADERS@
 LIBOBJ=lib/wildmatch.o lib/compat.o lib/snprintf.o lib/mdfour.o lib/md5.o \
 	lib/permstring.o lib/pool_alloc.o lib/sysacls.o lib/sysxattrs.o @LIBOBJS@
 zlib_OBJS=zlib/deflate.o zlib/inffast.o zlib/inflate.o zlib/inftrees.o \

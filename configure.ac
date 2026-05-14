@@ -92,6 +92,11 @@ AH_BOTTOM([
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
     WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_thread.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/win_select.o win32/stub_daemon.o"
+    # Pulled into the HEADERS list so changes to the Windows umbrella
+    # header trigger a rebuild of every .c file. config.h pulls in
+    # win_compat.h via AH_BOTTOM (above), but make doesn't follow
+    # include chains -- the explicit listing is the dependency.
+    WIN32_HEADERS="win32/win_compat.h win32/win_spawn.h win32/win_fork.h win32/win_paths.h win32/win_fs.h win32/win_ssh.h"
 
     # Pre-seed autoconf cache for checks that hard-code POSIX-only headers
     # (sys/socket.h, sys/types.h, etc.) in their test programs. On Windows
@@ -151,8 +156,10 @@ if test x$windows_native = xyes; then
     ac_cv_sizeof_off_t=4
 else
     WIN32_OBJS=""
+    WIN32_HEADERS=""
 fi
 AC_SUBST([WIN32_OBJS])
+AC_SUBST([WIN32_HEADERS])
 
 AC_DEFINE([_GNU_SOURCE], 1,
           [Define _GNU_SOURCE so that we get all necessary prototypes])

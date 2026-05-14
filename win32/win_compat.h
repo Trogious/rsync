@@ -81,9 +81,24 @@ __declspec(dllimport) int      __cdecl _dup2(int fd1, int fd2);
 __declspec(dllimport) int      __cdecl _close(int fd);
 __declspec(dllimport) int      __cdecl _read(int fd, void *buf, unsigned cnt);
 __declspec(dllimport) int      __cdecl _write(int fd, const void *buf, unsigned cnt);
+__declspec(dllimport) int      __cdecl _chsize_s(int fd, __int64 size);
 #ifdef __cplusplus
 }
 #endif
+
+/* ftruncate(fd, length): POSIX returns 0 / -1 with errno set. MSVC's
+ * equivalent is _chsize_s which returns the errno value directly (and
+ * does NOT touch the global errno). Bridge the two conventions so
+ * receiver.c / fileio.c can call ftruncate() unchanged. Enables both
+ * --inplace and --append (gated on HAVE_FTRUNCATE in usage.c). */
+static __inline int win_ftruncate(int fd, __int64 length)
+{
+    int rc = _chsize_s(fd, length);
+    if (rc != 0) { errno = rc; return -1; }
+    return 0;
+}
+#define ftruncate(fd, len) win_ftruncate((fd), (len))
+#define HAVE_FTRUNCATE 1
 
 /* MSVC's CRT lacks ssize_t. pid_t and mode_t may or may not be present
  * depending on the SDK version; use custom guards so we don't fight any
