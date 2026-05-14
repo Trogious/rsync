@@ -72,6 +72,7 @@ BOOL  lp_use_chroot(int m)         { (void)m; return 0; }
 char *lp_pid_file(void)            { return NULL; }
 char *lp_log_file(int m)           { (void)m; return NULL; }
 char *lp_refuse_options(int m)     { (void)m; return NULL; }
+char *lp_charset(int m)            { (void)m; return ""; }
 char *lp_syslog_tag(int m)         { (void)m; return NULL; }
 int   lp_syslog_facility(int m)    { (void)m; return 0; }
 BOOL  lp_reverse_lookup(int m)     { (void)m; return 0; }

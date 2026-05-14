@@ -74,7 +74,17 @@ export CFLAGS='-MT -O2 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS -DWIN32_NATIVE -Z7'
 export LDFLAGS='-Wl,-MAP:rsync.map -Wl,-DEBUG'
 # cl.exe accepts .lib filenames directly on the command line; INCLUDE/LIB
 # env vars (set by vcvars64.bat + extended above) tell it where to look.
-export LIBS='libcrypto.lib zstd.lib lz4.lib xxhash.lib ws2_32.lib advapi32.lib iphlpapi.lib crypt32.lib secur32.lib userenv.lib bcrypt.lib user32.lib'
+export LIBS='libcrypto.lib zstd.lib lz4.lib xxhash.lib iconv.lib ws2_32.lib advapi32.lib iphlpapi.lib crypt32.lib secur32.lib userenv.lib bcrypt.lib user32.lib'
+
+# Pre-seed iconv-related autoconf cache entries: configure runs link tests
+# under MSYS bash which can't find iconv via standard probes (it expects
+# pkg-config / GNU layout). We installed vcpkg's libiconv whose iconv.h
+# #defines iconv_open -> libiconv_open and links via iconv.lib.
+export ac_cv_header_iconv_h=yes
+export ac_cv_search_iconv_open='none required'
+export ac_cv_search_libiconv_open='none required'
+export am_cv_proto_iconv_arg1=
+export am_cv_proto_iconv='extern size_t iconv (iconv_t cd, char * *inbuf, size_t *inbytesleft, char * *outbuf, size_t *outbytesleft);'
 
 ./configure.sh \
     --host=x86_64-pc-windows \
@@ -82,8 +92,7 @@ export LIBS='libcrypto.lib zstd.lib lz4.lib xxhash.lib ws2_32.lib advapi32.lib i
     --disable-acl-support \
     --disable-xattr-support \
     --disable-md2man \
-    --disable-locale \
-    --disable-iconv-open
+    --disable-locale
 
 make -j`$(nproc) rsync.exe
 "@
