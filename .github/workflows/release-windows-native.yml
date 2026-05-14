@@ -98,11 +98,15 @@ jobs:
           $version   = (& git describe --tags --always).Trim()
           $commit    = (& git rev-parse --short=8 HEAD).Trim()
           $buildDate = (Get-Date -Format 'yyyy-MM-dd')
-          $archive   = "rsync-native-${tag}-windows-x86_64.7z"
+          $stem      = "rsync-native-${tag}-windows-x86_64"
+          $archive   = "$stem.7z"
 
-          New-Item -ItemType Directory -Force stage | Out-Null
-          Copy-Item rsync.exe       stage\rsync.exe
-          Copy-Item COPYING         stage\LICENSE.txt
+          # Stage into a directory whose NAME matches the archive stem
+          # so the 7z, when extracted, drops a single top-level folder
+          # rather than scattering files into the cwd.
+          New-Item -ItemType Directory -Force $stem | Out-Null
+          Copy-Item rsync.exe  "$stem\rsync.exe"
+          Copy-Item COPYING    "$stem\LICENSE.txt"
 
           # Stamp the README with build metadata so a downloaded archive
           # is self-describing.
@@ -111,9 +115,11 @@ jobs:
                             -replace '@@VERSION@@',     $version `
                             -replace '@@COMMIT@@',      $commit `
                             -replace '@@BUILD_DATE@@',  $buildDate
-          Set-Content -Path stage\README.md -Value $readme -NoNewline
+          Set-Content -Path "$stem\README.md" -Value $readme -NoNewline
 
-          & 'C:\Program Files\7-Zip\7z.exe' a -mx=9 $archive .\stage\*
+          # Adding `.\$stem` (no trailing wildcard) makes 7z store the
+          # directory itself as an entry, so extraction recreates it.
+          & 'C:\Program Files\7-Zip\7z.exe' a -mx=9 $archive ".\$stem"
           $sha = (Get-FileHash $archive -Algorithm SHA256).Hash
           $sha | Out-File -Encoding ASCII "$archive.sha256"
 
