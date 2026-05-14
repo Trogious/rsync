@@ -68,9 +68,11 @@ chmod +x configure.sh
 # build-aux/compile wraps cl.exe to accept unix CLI flags (-c -o, -L, -l).
 # build-aux/ar-lib does the same for lib.exe.
 export CC='$repoMsys/build-aux/compile cl.exe -nologo'
+export CXX='$repoMsys/build-aux/compile cl.exe -nologo -TP -EHsc'
 export AR='$repoMsys/build-aux/ar-lib lib.exe -nologo'
 export RANLIB=true
 export CFLAGS='-MT -O2 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS -DWIN32_NATIVE -Z7'
+export CXXFLAGS='-MT -O2 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS -DWIN32_NATIVE -Z7'
 export LDFLAGS='-Wl,-MAP:rsync.map -Wl,-DEBUG'
 # cl.exe accepts .lib filenames directly on the command line; INCLUDE/LIB
 # env vars (set by vcvars64.bat + extended above) tell it where to look.
@@ -92,7 +94,8 @@ export am_cv_proto_iconv='extern size_t iconv (iconv_t cd, char * *inbuf, size_t
     --disable-acl-support \
     --disable-xattr-support \
     --disable-md2man \
-    --disable-locale
+    --disable-locale \
+    --enable-roll-simd
 
 make -j`$(nproc) rsync.exe
 "@

@@ -51,7 +51,8 @@
  * GCC 4.x are not supported to ease configure.ac logic.
  */
 
-#ifdef __x86_64__ /* { */
+/* On MSVC the GCC __x86_64__ predefine isn't set — use _M_X64. */
+#if defined(__x86_64__) || defined(_M_X64) /* { */
 #ifdef __cplusplus /* { */
 
 #include "rsync.h"
@@ -67,9 +68,24 @@
 #define MVSTATIC static
 #endif
 
+/* MSVC has no __attribute__((target(...))) — it just emits whatever the
+ * /arch flag allows. Without runtime CPU dispatch we have to commit to a
+ * minimum ISA at compile time. The win32-port build chooses AVX2 (Intel
+ * Haswell 2013+ / AMD Excavator 2015+) which covers any machine that's
+ * remotely current. Pre-AVX2 CPUs would crash on first use of the SIMD
+ * checksum — out of scope for this port. */
+#ifdef _MSC_VER
+#define __attribute__(x)
+/* MSVC's intrinsics don't have a separate __m128i_u / __m256i_u —
+ * the loadu/storeu intrinsics accept the canonical aligned types
+ * for any alignment. Alias them so the rest of the file just works. */
+typedef __m128i __m128i_u;
+typedef __m256i __m256i_u;
+#else
 // Missing from the headers on gcc 6 and older, clang 8 and older
 typedef long long __m128i_u __attribute__((__vector_size__(16), __may_alias__, __aligned__(16)));
 typedef long long __m256i_u __attribute__((__vector_size__(32), __may_alias__, __aligned__(16)));
+#endif
 
 /* Compatibility macros to let our SSSE3 algorithm run with only SSE2.
    These used to be neat individual functions with target attributes switching between SSE2 and SSSE3 implementations
@@ -85,11 +101,19 @@ typedef long long __m256i_u __attribute__((__vector_size__(32), __may_alias__, _
 #define SSE2_HADDS_EPI16(a, b) _mm_adds_epi16(SSE2_INTERLEAVE_EVEN_EPI16(a, b), SSE2_INTERLEAVE_ODD_EPI16(a, b))
 #define SSE2_MADDUBS_EPI16(a, b) _mm_adds_epi16(SSE2_MULU_EVEN_EPI8(a, b), SSE2_MULU_ODD_EPI8(a, b))
 
+#ifndef _MSC_VER
+/* On GCC/clang the "default" multiversion (= no-op fallback) coexists
+ * with the SSE2/SSSE3/AVX2 variants below — the linker resolves the
+ * right one per call site. MSVC has no multiversion: those stubs and
+ * the real implementations would collide as duplicate function bodies.
+ * Skip the fallback stubs; modern x86_64 always has SSE2/SSSE3, and
+ * AVX2 is the documented minimum for the win32-port build. */
 #ifndef USE_ROLL_ASM
 __attribute__ ((target("default"))) MVSTATIC int32 get_checksum1_avx2_64(schar* buf, int32 len, int32 i, uint32* ps1, uint32* ps2) { return i; }
 #endif
 __attribute__ ((target("default"))) MVSTATIC int32 get_checksum1_ssse3_32(schar* buf, int32 len, int32 i, uint32* ps1, uint32* ps2) { return i; }
 __attribute__ ((target("default"))) MVSTATIC int32 get_checksum1_sse2_32(schar* buf, int32 len, int32 i, uint32* ps1, uint32* ps2) { return i; }
+#endif /* !_MSC_VER */
 
 /*
   Original loop per 4 bytes:
@@ -406,7 +430,7 @@ __attribute__ ((target("avx2"))) MVSTATIC int32 get_checksum1_avx2_64(schar* buf
             mul32 = _mm256_add_epi32(mul32, _mm256_srli_si256(mul32, 4));
             mul32 = _mm256_add_epi32(mul32, _mm256_srli_si256(mul32, 8));
 	    // prefetch 2 cacheline ahead
-            _mm_prefetch(&buf[i + 160], _MM_HINT_T0);
+            _mm_prefetch((const char *)&buf[i + 160], _MM_HINT_T0);
 
             // s2 += 28*t1[0] + 24*t1[1] + 20*t1[2] + 16*t1[3] + 12*t1[4] + 8*t1[5] + 4*t1[6]
 	    __m128i mul32_hi = _mm256_extracti128_si256(mul32, 0x1);

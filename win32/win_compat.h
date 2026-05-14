@@ -25,6 +25,7 @@
 #include <signal.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>            /* localtime_s, the localtime_r shim wants it */
 #include <sys/types.h>
 #include <sys/stat.h>
 

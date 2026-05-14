@@ -372,22 +372,34 @@ fi
 if test x"$enable_roll_simd" != x"no"; then
     # For x86-64 SIMD, g++ >=5 or clang++ >=7 is required
     if test x"$host_cpu" = x"x86_64" || test x"$host_cpu" = x"amd64"; then
-	AC_LANG(C++)
-	if test x"$host" = x"$build"; then
-	    AC_RUN_IFELSE([AC_LANG_PROGRAM([SIMD_X86_64_TEST],[[if (test_ssse3(42) != 42 || test_sse2(42) != 42 || test_avx2(42) != 42) exit(1);]])],
-		[CXX_OK=yes],[CXX_OK=no])
-	else
-	    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([SIMD_X86_64_TEST])],[CXX_OK=yes],[CXX_OK=no])
-	fi
-	AC_LANG(C)
-	if test x"$CXX_OK" = x"yes"; then
-	    # AC_MSG_RESULT() is called below.
-	    ROLL_SIMD="$host_cpu"
-	elif test x"$enable_roll_simd" = x"yes"; then
-	    AC_MSG_RESULT(error)
-	    AC_MSG_ERROR(The rolling-checksum SIMD compilation test failed.
+	case "$host_os" in
+	    *mingw* | *cygwin* | *windows*)
+		# MSVC does not implement __attribute__((target(...))) so
+		# the runtime-multiversion compile test below would always
+		# fail. simd-checksum-x86_64.cpp has _MSC_VER conditional
+		# branches that skip the attribute machinery and emit fixed
+		# (AVX2-baseline) code instead; enable unconditionally.
+		ROLL_SIMD="$host_cpu"
+		;;
+	    *)
+		AC_LANG(C++)
+		if test x"$host" = x"$build"; then
+		    AC_RUN_IFELSE([AC_LANG_PROGRAM([SIMD_X86_64_TEST],[[if (test_ssse3(42) != 42 || test_sse2(42) != 42 || test_avx2(42) != 42) exit(1);]])],
+			[CXX_OK=yes],[CXX_OK=no])
+		else
+		    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([SIMD_X86_64_TEST])],[CXX_OK=yes],[CXX_OK=no])
+		fi
+		AC_LANG(C)
+		if test x"$CXX_OK" = x"yes"; then
+		    # AC_MSG_RESULT() is called below.
+		    ROLL_SIMD="$host_cpu"
+		elif test x"$enable_roll_simd" = x"yes"; then
+		    AC_MSG_RESULT(error)
+		    AC_MSG_ERROR(The rolling-checksum SIMD compilation test failed.
 Omit --enable-roll-simd to continue without it.)
-	fi
+		fi
+		;;
+	esac
     elif test x"$enable_roll_simd" = x"yes"; then
         AC_MSG_RESULT(unavailable)
         AC_MSG_ERROR(The rolling-checksum SIMD optimizations are currently x86_64|amd64 only.
