@@ -16,6 +16,12 @@ if (-not (Test-Path $Binary)) {
     throw "Binary not found: $Binary"
 }
 
+# PowerShell's call operator (`&`) won't run a relative-path executable
+# unless we prefix it with `.\` or hand it an absolute path. Resolve
+# whatever the caller passed (e.g. "rsync.exe" from CI) into the full
+# path so & $Binary just works downstream.
+$Binary = (Resolve-Path $Binary).Path
+
 Write-Host '== --version =='
 & $Binary --version
 if ($LASTEXITCODE -ne 0) { throw "rsync --version failed (exit $LASTEXITCODE)" }
