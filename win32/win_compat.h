@@ -26,8 +26,49 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>            /* localtime_s, the localtime_r shim wants it */
+
+/* === Large-file support (files > 2 GiB) ====================================
+ *
+ * MSVC's off_t is `long` — 32-bit on Windows, so configure (correctly)
+ * reports SIZEOF_OFF_T=4 and SIZEOF_OFF64_T=0 (off64_t isn't a CRT type).
+ * That funnels rsync.h's OFF_T / STRUCT_STAT macros down the 32-bit
+ * branch and flist.c bails out with "Offset overflow: attempted 64-bit
+ * file-length" on anything bigger than 2 GiB.
+ *
+ * Override the configure-detected sizes BEFORE rsync.h evaluates its
+ * `#if SIZEOF_OFF_T == 8 || !SIZEOF_OFF64_T || !defined HAVE_STRUCT_STAT64`
+ * test (rsync.h:654). With these in place rsync picks OFF_T = off64_t and
+ * STRUCT_STAT = struct stat64; the macro redirects below then send those
+ * names at MSVC's _stat64 / _fstat64 / _lseeki64 functions, which take
+ * 64-bit st_size / file offsets.
+ *
+ * Done up here, before <sys/types.h> / <sys/stat.h>, so the off64_t
+ * typedef doesn't collide with anything the CRT brings in later. */
+#undef  SIZEOF_OFF64_T
+#define SIZEOF_OFF64_T 8
+#define HAVE_STRUCT_STAT64 1
+#define HAVE_LSEEK64       1
+#define HAVE_OFF64_T       1
+typedef __int64 off64_t;
+
 #include <sys/types.h>
 #include <sys/stat.h>
+
+/* After the CRT headers have declared their 32-bit `stat`/`fstat` and the
+ * 64-bit `_stat64`/`_fstat64`, retarget the unqualified names at the
+ * 64-bit variants. Object-like macros: `struct stat sb` becomes
+ * `struct _stat64 sb` (same shape MSVC's _stat64() fills in), and any
+ * call to stat()/fstat()/lseek() becomes the wide version. `lstat`
+ * is shimmed further down (line ~199) to stat(); the macro chain ends
+ * at _stat64.  lseek64 is rsync's helper name (used via HAVE_LSEEK64
+ * in syscall.c::do_lseek). */
+#define stat64   _stat64
+#define stat     _stat64
+#define fstat64  _fstat64
+#define fstat    _fstat64
+#define lstat64  _stat64
+#define lseek64  _lseeki64
+#define lseek    _lseeki64
 
 /* From MSVC's <io.h> — re-declared because -I. lookup grabs the local
  * io.h. These prototypes match the CRT declarations exactly. */
