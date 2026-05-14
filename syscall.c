@@ -784,6 +784,14 @@ int secure_relative_open(const char *basedir, const char *relpath, int flags, mo
 
 #if !defined(O_NOFOLLOW) || !defined(O_DIRECTORY) || !defined(AT_FDCWD)
 	// really old system, all we can do is live with the risks
+#ifdef WIN32_NATIVE
+	/* MSVC's open() defaults to text mode (CRLF translation). The
+	 * receiver opens its basis file through this function and then
+	 * map_ptr()s it for block-level reads during delta-transfer;
+	 * without O_BINARY any 0x0D/0x0A bytes in the basis get rewritten
+	 * and the reconstructed file fails the whole-file MD5 check. */
+	flags |= O_BINARY;
+#endif
 	if (!basedir) {
 		return open(relpath, flags, mode);
 	}
