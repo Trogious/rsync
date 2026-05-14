@@ -2230,8 +2230,21 @@ void generate_files(int f_out, const char *local_name)
 	char fbuf[MAXPATHLEN];
 	int itemizing;
 	enum logcode code;
+#ifndef WIN32_NATIVE
+	/* On POSIX the generator is a separate process from the receiver,
+	 * so zeroing these flags below silences generator-side prints
+	 * without touching what the receiver child sees. On Windows the
+	 * generator and receiver are threads of one process sharing the
+	 * same info_levels array; zeroing here also blanks the receiver's
+	 * INFO_GTE(PROGRESS, ...) checks and per-file --progress output
+	 * never appears. Skip the save/zero/restore entirely on Windows
+	 * (the only generator-side reads of these flags are flist.c's
+	 * flist_count_offset accumulator, used by --info=progress2 totals,
+	 * and the generator-side blank-line erase in generate_files;
+	 * neither hurts to leave at the user-set level). */
 	int save_info_flist = info_levels[INFO_FLIST];
 	int save_info_progress = info_levels[INFO_PROGRESS];
+#endif
 
 	if (protocol_version >= 29) {
 		itemizing = 1;
@@ -2267,7 +2280,9 @@ void generate_files(int f_out, const char *local_name)
 		deldelay_size = BIGPATHBUFLEN * 4;
 		deldelay_buf = new_array(char, deldelay_size);
 	}
+#ifndef WIN32_NATIVE
 	info_levels[INFO_FLIST] = info_levels[INFO_PROGRESS] = 0;
+#endif
 
 	if (append_mode > 0 || whole_file < 0)
 		whole_file = 0;
@@ -2403,8 +2418,10 @@ void generate_files(int f_out, const char *local_name)
 			wait_for_receiver();
 	}
 
+#ifndef WIN32_NATIVE
 	info_levels[INFO_FLIST] = save_info_flist;
 	info_levels[INFO_PROGRESS] = save_info_progress;
+#endif
 
 	if (delete_during == 2)
 		do_delayed_deletions(fbuf);
