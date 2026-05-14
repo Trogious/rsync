@@ -89,6 +89,14 @@ AH_BOTTOM([
 # include "win32/win_compat.h"
 #endif
 ])
+AC_ARG_ENABLE(win-crash-trace,
+    AS_HELP_STRING([--enable-win-crash-trace],
+        [Windows: install a SetUnhandledExceptionFilter that writes a crash log (exception code, address, thread id, stack RVAs) to %LOCALAPPDATA%/rsync/rsync-crash-PID.log on any unhandled exception. Off by default (matches upstream). Build with this flag for diagnosing native-Windows-port crashes.]))
+if test x"$enable_win_crash_trace" = x"yes"; then
+    AC_DEFINE(WIN_CRASH_TRACE, 1,
+        [Define to 1 to install a Windows unhandled-exception filter that writes a crash log on startup.])
+fi
+
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
     WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_thread.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/win_select.o win32/stub_daemon.o"

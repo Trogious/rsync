@@ -318,6 +318,15 @@ int win_select(int nfds, fd_set *readfds, fd_set *writefds,
 typedef int (*win_thread_main_t)(void *arg);
 pid_t win_thread_fork(win_thread_main_t fn, void *arg);
 
+#ifdef WIN_CRASH_TRACE
+/* Install a SetUnhandledExceptionFilter that logs the crash code,
+ * faulting address, thread id and stack RVAs to a file under
+ * %LOCALAPPDATA%/rsync/ (or %TEMP% as fallback; override with
+ * the RSYNC_CRASH_LOG env var). Gated behind --enable-win-crash-trace
+ * at configure time; the default release build omits it. */
+void win_install_crash_handler(void);
+#endif
+
 /* iobuf.in transfer across do_recv thread boundary. Forward declaration
  * here so do_recv (which lives in main.c) can pass a snapshot blob to
  * the receiver thread. See io.c::iobuf_snapshot_in_state for the

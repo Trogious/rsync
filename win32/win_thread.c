@@ -33,6 +33,90 @@
 #include <errno.h>
 #include <process.h>   /* _beginthreadex */
 
+#ifdef WIN_CRASH_TRACE
+/* Crash diagnostics: install a process-wide unhandled-exception filter
+ * that writes the exception code, faulting address, thread id, image
+ * base, and a 16-frame stack backtrace (as RVAs you can look up in
+ * rsync.map) to a log file. Called from main() at startup when this
+ * unit was compiled with --enable-win-crash-trace.
+ *
+ * Default destination: %LOCALAPPDATA%/rsync/rsync-crash-<pid>.log
+ * Override with the RSYNC_CRASH_LOG env var (absolute path).
+ * Falls back to %TEMP% if LOCALAPPDATA isn't set. */
+static void win_resolve_crash_log(char *out, size_t out_size, DWORD pid)
+{
+    char dir[MAX_PATH];
+    DWORD n;
+
+    n = GetEnvironmentVariableA("RSYNC_CRASH_LOG", out, (DWORD)out_size);
+    if (n > 0 && n < out_size)
+        return;
+
+    n = GetEnvironmentVariableA("LOCALAPPDATA", dir, sizeof(dir));
+    if (n == 0 || n >= sizeof(dir))
+        n = GetEnvironmentVariableA("TEMP", dir, sizeof(dir));
+    if (n == 0 || n >= sizeof(dir)) {
+        /* No usable env var; write into the current directory as a
+         * last resort. CWD is always writable on a process that got
+         * far enough to crash. */
+        dir[0] = '.';
+        dir[1] = '\0';
+    } else {
+        char rsync_subdir[MAX_PATH];
+        if ((size_t)snprintf(rsync_subdir, sizeof(rsync_subdir),
+                             "%s\\rsync", dir) < sizeof(rsync_subdir)) {
+            CreateDirectoryA(rsync_subdir, NULL); /* ignore "already exists" */
+            snprintf(dir, sizeof(dir), "%s", rsync_subdir);
+        }
+    }
+    snprintf(out, out_size, "%s\\rsync-crash-%lu.log",
+             dir, (unsigned long)pid);
+}
+
+static LONG WINAPI win_crash_handler(EXCEPTION_POINTERS *info)
+{
+    char logpath[MAX_PATH * 2];
+    win_resolve_crash_log(logpath, sizeof(logpath), GetCurrentProcessId());
+    FILE *_dbg = fopen(logpath, "a");
+    if (_dbg) {
+        HMODULE base = GetModuleHandleA(NULL);
+        fprintf(_dbg, "[CRASH] code=0x%08lx address=%p tid=%lu image_base=%p",
+            (unsigned long)info->ExceptionRecord->ExceptionCode,
+            info->ExceptionRecord->ExceptionAddress,
+            GetCurrentThreadId(),
+            (void *)base);
+        if (info->ExceptionRecord->NumberParameters >= 2) {
+            fprintf(_dbg, " op=%lu fault_addr=%p",
+                (unsigned long)info->ExceptionRecord->ExceptionInformation[0],
+                (void *)info->ExceptionRecord->ExceptionInformation[1]);
+        }
+        fprintf(_dbg, "\n");
+        /* Stack walk: capture up to 16 frames. RVA = offset from the
+         * loaded image base, which you can plug into rsync.map. */
+        void *frames[16];
+        USHORT n = CaptureStackBackTrace(0, 16, frames, NULL);
+        fprintf(_dbg, "[CRASH] stack (%u frames, RVA from image_base):\n", n);
+        for (USHORT i = 0; i < n; i++) {
+            uintptr_t rva = (uintptr_t)frames[i] - (uintptr_t)base;
+            fprintf(_dbg, "    %2u: %p  rva=0x%llx\n",
+                i, frames[i], (unsigned long long)rva);
+        }
+        uintptr_t crash_rva = (uintptr_t)info->ExceptionRecord->ExceptionAddress - (uintptr_t)base;
+        fprintf(_dbg, "[CRASH] crash_rva=0x%llx (preferred image base 0x140000000 -> look up MAP at 0x%llx)\n",
+            (unsigned long long)crash_rva,
+            (unsigned long long)(0x140000000ULL + crash_rva));
+        fflush(_dbg);
+        fclose(_dbg);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void win_install_crash_handler(void)
+{
+    SetUnhandledExceptionFilter(win_crash_handler);
+}
+#endif /* WIN_CRASH_TRACE */
+
 struct win_thread_ctx {
     win_thread_main_t fn;
     void             *arg;

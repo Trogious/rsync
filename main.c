@@ -2031,6 +2031,11 @@ int main(int argc,char *argv[])
 		_setmode(0, 0x8000 /* _O_BINARY */);
 		_setmode(1, 0x8000 /* _O_BINARY */);
 	}
+#ifdef WIN_CRASH_TRACE
+	/* Off by default; enable at configure time with
+	 * --enable-win-crash-trace to opt into per-crash log files. */
+	win_install_crash_handler();
+#endif
 #endif
 
 	raw_argc = argc;
