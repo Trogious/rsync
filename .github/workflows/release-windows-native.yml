@@ -45,8 +45,15 @@ jobs:
         with:
           msystem: MSYS
           update: true
+          # No `autotools` -- not an actual package in MSYS2's pacman
+          # repo. Use the explicit names that provide aclocal /
+          # autoconf / libtool. `base-devel` brings in compilers we
+          # don't need but is the standard meta-package for utilities
+          # like make / patch / sed already.
           install: >-
-            base-devel autotools make tar curl python git
+            base-devel
+            autoconf automake-wrapper libtool m4
+            make tar curl python git
             patch sed gawk gperf bison flex texinfo
 
       - name: Cache vcpkg
