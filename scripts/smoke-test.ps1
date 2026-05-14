@@ -34,9 +34,20 @@ New-Item -ItemType Directory $src | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "rsync local copy failed (exit $LASTEXITCODE)" }
 if (-not (Test-Path "$dst\file.txt")) { throw 'destination file missing' }
 
-# Compare contents
-$srcHash = (Get-FileHash "$src\file.txt" -Algorithm SHA256).Hash
-$dstHash = (Get-FileHash "$dst\file.txt" -Algorithm SHA256).Hash
+# Compare contents. Use .NET directly: when PowerShell 7 is installed
+# alongside, its v7 Utility module sometimes shadows the v3.1 one that
+# Windows PowerShell 5.1 needs for Get-FileHash, and the cmdlet then
+# disappears.
+function Get-Sha256Hex([string]$Path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+        finally { $stream.Dispose() }
+    } finally { $sha.Dispose() }
+}
+$srcHash = Get-Sha256Hex "$src\file.txt"
+$dstHash = Get-Sha256Hex "$dst\file.txt"
 if ($srcHash -ne $dstHash) {
     throw "Round-trip hash mismatch: $srcHash != $dstHash"
 }
