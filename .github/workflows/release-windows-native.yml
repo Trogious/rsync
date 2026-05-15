@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag name for the release (e.g. win-v3.4.2-1). Created on the current win32-port HEAD if it does not already exist.'
+        description: 'Tag name for the release (e.g. rsync-client-static-win-native-v3.4.2-1). Created on the current win32-port HEAD if it does not already exist. The archive name drops the "win-native" segment.'
         required: true
         type: string
       prerelease:
@@ -98,7 +98,11 @@ jobs:
           $version   = (& git describe --tags --always).Trim()
           $commit    = (& git rev-parse --short=8 HEAD).Trim()
           $buildDate = (Get-Date -Format 'yyyy-MM-dd')
-          $stem      = "rsync-native-${tag}-windows-x86_64"
+          # Archive name drops "-win-native" from the tag so it reads
+          #   rsync-client-static-v3.4.2-1-windows-x86_64
+          # while the release tag stays
+          #   rsync-client-static-win-native-v3.4.2-1
+          $stem      = ($tag -replace '-win-native-', '-') + '-windows-x86_64'
           $archive   = "$stem.7z"
 
           # Stage into a directory whose NAME matches the archive stem
@@ -130,10 +134,10 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rsync-native-windows-x86_64
+          name: rsync-client-static-windows-x86_64
           path: |
-            rsync-native-*-windows-x86_64.7z
-            rsync-native-*-windows-x86_64.7z.sha256
+            rsync-client-static-*-windows-x86_64.7z
+            rsync-client-static-*-windows-x86_64.7z.sha256
 
       - name: Create / update tag on win32-port HEAD
         shell: pwsh
