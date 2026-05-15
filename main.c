@@ -43,6 +43,11 @@ extern int inc_recurse;
 extern int blocking_io;
 extern int always_checksum;
 extern int remove_source_files;
+/* ROLE_TLS globals that the receiver thread inherits/reports back via
+ * do_recv_args. See io.c for csum_length / total_data_*. */
+extern ROLE_TLS int csum_length;
+extern ROLE_TLS int64 total_data_read;
+extern ROLE_TLS int64 total_data_written;
 extern ROLE_TLS int output_needs_newline;
 extern int called_from_signal_handler;
 extern int need_messages_from_generator;
@@ -1053,6 +1058,20 @@ struct do_recv_args {
 	 * stdout (which is the protocol pipe on a local-child spawn). */
 	int               snap_am_server;
 	int               snap_am_sender;
+	/* csum_length is ROLE_TLS so each thread has its own copy of the
+	 * SHORT_SUM_LENGTH / SUM_LENGTH state that the generator's redo
+	 * block (generator.c:2161-2199) and the receiver's per-file flip
+	 * (receiver.c:646-665) toggle. Snapshot the main thread's value at
+	 * fork so the receiver doesn't start with the default-zero
+	 * __declspec(thread) value. */
+	int               snap_csum_length;
+	/* The receiver thread's accumulated I/O byte counts are written
+	 * back here when the thread exits, so the main (generator) thread
+	 * can fold them into its own copies before --stats is printed.
+	 * Without this the per-thread ROLE_TLS counters get lost on thread
+	 * teardown and the reported transfer rate is wrong. */
+	int64             ret_total_data_read;
+	int64             ret_total_data_written;
 #endif
 };
 
@@ -1109,6 +1128,12 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 		acls_ndx        = args->snap_acls_ndx;
 		xattrs_ndx      = args->snap_xattrs_ndx;
 		unsort_ndx      = args->snap_unsort_ndx;
+		/* csum_length is ROLE_TLS: each thread has its own copy of the
+		 * SHORT_SUM_LENGTH / SUM_LENGTH state. Without the snapshot
+		 * the receiver thread would start with the default-zero
+		 * __declspec(thread) value and downstream io.c::read_sum_head
+		 * would compute the wrong block-strong-checksum length. */
+		csum_length = args->snap_csum_length;
 	}
 #endif
 
@@ -1211,15 +1236,18 @@ static int do_recv_receiver_win(int f_in, int f_out_to_close,
 }
 
 #ifdef WIN32_NATIVE
-/* Thread trampoline for the Windows do_recv split. Frees the args
- * struct, hands the return value to win_thread_trampoline which uses
- * it as the thread exit code. */
+/* Thread trampoline for the Windows do_recv split. Persists the
+ * receiver thread's accumulated I/O byte counts back into the args
+ * struct so the generator (main thread) can fold them in after join.
+ * The args struct is OWNED BY do_recv (main thread); we must not free
+ * it here, or main reads a use-after-free. */
 static int do_recv_thread_main(void *p)
 {
 	struct do_recv_args *a = (struct do_recv_args *)p;
 	int rc = do_recv_receiver_win(a->f_in, a->f_out, a->error_pipe_w,
 	                              a->local_name, a);
-	free(a);
+	a->ret_total_data_read    = total_data_read;
+	a->ret_total_data_written = total_data_written;
 	return rc;
 }
 #endif
@@ -1229,6 +1257,12 @@ static int do_recv(int f_in, int f_out, char *local_name)
 	int pid;
 	int exit_code = 0;
 	int error_pipe[2];
+#ifdef WIN32_NATIVE
+	/* Lives past the receiver-thread join so we can fold its accumulated
+	 * total_data_read / total_data_written back into the main thread's
+	 * counters for --stats. Freed at end of do_recv. */
+	struct do_recv_args *recv_args = NULL;
+#endif
 
 	/* The receiving side mustn't obey this, or an existing symlink that
 	 * points to an identical file won't be replaced by the referent. */
@@ -1297,6 +1331,7 @@ static int do_recv(int f_in, int f_out, char *local_name)
 		 * until the receiver thread joins; the deferred-close happens
 		 * after wait_process_with_flush. */
 		struct do_recv_args *args = (struct do_recv_args *)malloc(sizeof(*args));
+		recv_args = args;
 		if (!args) { errno = ENOMEM; pid = -1; }
 		else {
 			args->f_in         = f_in;
@@ -1332,10 +1367,16 @@ static int do_recv(int f_in, int f_out, char *local_name)
 			args->snap_unsort_ndx     = unsort_ndx;
 			args->snap_am_server      = am_server;
 			args->snap_am_sender      = am_sender;
+			/* csum_length is ROLE_TLS -- see the matching restore in
+			 * do_recv_receiver_win. */
+			args->snap_csum_length        = csum_length;
+			args->ret_total_data_read     = 0;
+			args->ret_total_data_written  = 0;
 			pid = win_thread_fork(do_recv_thread_main, args);
 			if (pid == (pid_t)-1) {
 				free(args->iobuf_in_snap.bytes);
 				free(args);
+				recv_args = NULL;
 			}
 		}
 		if (pid == -1) {
@@ -1420,6 +1461,17 @@ static int do_recv(int f_in, int f_out, char *local_name)
 	wait_process_with_flush(pid, &exit_code);
 
 #ifdef WIN32_NATIVE
+	/* Fold the receiver thread's accumulated total_data_read /
+	 * total_data_written into the main thread's counters so --stats /
+	 * end-of-run rate reporting includes both halves. Safe to read now:
+	 * wait_process_with_flush has joined the thread, so no more writes
+	 * to the ret_ fields are in flight. */
+	if (recv_args) {
+		total_data_read    += recv_args->ret_total_data_read;
+		total_data_written += recv_args->ret_total_data_written;
+		free(recv_args);
+		recv_args = NULL;
+	}
 	/* On Windows the receiver thread already closed error_pipe_w
 	 * (= error_pipe[1] in our fd table — we share it across threads)
 	 * before exiting. Closing it again triggers MSVC's _close()

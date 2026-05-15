@@ -65,7 +65,7 @@ extern int modify_window;
 extern int inplace;
 extern int append_mode;
 extern int make_backups;
-extern int csum_length;
+extern ROLE_TLS int csum_length;        /* see io.c */
 extern int ignore_times;
 extern int size_only;
 extern OFF_T max_size;

@@ -33,6 +33,14 @@ extern unsigned int module_dirlen;
 extern filter_rule_list filter_list;
 extern filter_rule_list daemon_filter_list;
 
+/* Cannot be ROLE_TLS: long_options[] below has `&make_backups` in its
+ * static initializer, and MSVC rejects the address of a TLS variable
+ * in a const-init context. The generator's redo block flips this; the
+ * receiver's per-file dispatch (recv_files) and finish_transfer also
+ * flip it. On Windows, both threads share this storage, so there's a
+ * narrow race window if the generator enters its redo block (only on
+ * transfer-verification failure -- rare) while the receiver is
+ * mid-flip on a per-file boundary. Documented in PORTING.md. */
 int make_backups = 0;
 
 /**
@@ -45,7 +53,7 @@ int make_backups = 0;
  **/
 int whole_file = -1;
 
-int append_mode = 0;
+int append_mode = 0;       /* not ROLE_TLS, see make_backups above */
 int keep_dirlinks = 0;
 int copy_dirlinks = 0;
 int copy_links = 0;
@@ -67,6 +75,13 @@ int preserve_crtimes = 0;
 int omit_dir_times = 0;
 int omit_link_times = 0;
 int trust_sender = 0;
+/* update_only, ignore_times, sparse_files, size_only, ignore_existing,
+ * ignore_non_existing, max_size, min_size are flipped by the generator
+ * redo block but only ever READ by generator-side code (or by flist
+ * building) -- the receiver never reads them directly, so the flip
+ * stays inside the generator's own thread context and TLS isn't
+ * required. Same MSVC constraint as make_backups would apply to
+ * sparse_files anyway (popt entry references &sparse_files). */
 int update_only = 0;
 int open_noatime = 0;
 int cvs_exclude = 0;
@@ -82,7 +97,7 @@ int delete_excluded = 0;
 int remove_source_files = 0;
 int one_file_system = 0;
 int protocol_version = PROTOCOL_VERSION;
-int sparse_files = 0;
+int sparse_files = 0;     /* not ROLE_TLS (popt &sparse_files) */
 int preallocate_files = 0;
 int do_compression = 0;
 int do_compression_level = CLVL_NOT_SPECIFIED;
@@ -217,6 +232,12 @@ int stdout_format_has_i = 0;
 int stdout_format_has_o_or_i = 0;
 int logfile_format_has_i = 0;
 int logfile_format_has_o_or_i = 0;
+/* NOT ROLE_TLS even though it's flipped in the generator redo block:
+ * only generator-side and flist-building code reads this, so the flip
+ * stays inside the same thread context that performs it. Leaving it
+ * non-TLS keeps batch.c's flag_ptr[] table initializable as a constant
+ * (MSVC rejects taking the address of a thread-local for a static
+ * initializer). */
 int always_checksum = 0;
 int list_only = 0;
 

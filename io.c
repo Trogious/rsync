@@ -71,7 +71,14 @@ extern int filesfrom_convert;
 extern iconv_t ic_send, ic_recv;
 #endif
 
-int csum_length = SHORT_SUM_LENGTH; /* initial value */
+/* csum_length is flipped between SHORT_SUM_LENGTH and SUM_LENGTH in the
+ * redo blocks of generator.c (line 2164/2189), receiver.c (line 653/663),
+ * and sender.c. On POSIX those are separate processes; on Windows they are
+ * threads of one process sharing this global, so flipping it from one
+ * thread blanks the other's view mid-transfer. ROLE_TLS gives each thread
+ * its own copy; the receiver thread's initial value is copied from main
+ * via do_recv_args snap_csum_length. */
+ROLE_TLS int csum_length = SHORT_SUM_LENGTH; /* initial value */
 int allowed_lull = 0;
 int msgdone_cnt = 0;
 /* forward_flist_data: when nonzero, read_buf() forwards every byte it
@@ -92,8 +99,14 @@ int got_kill_signal = -1; /* is set to 0 only after multiplexed I/O starts */
 ROLE_TLS int sock_f_in = -1;   /* generator clears to -1; receiver too via different field */
 ROLE_TLS int sock_f_out = -1;
 
-int64 total_data_read = 0;
-int64 total_data_written = 0;
+/* read_buf() / write_buf() do += on these. On Windows both the generator
+ * and receiver threads run those functions concurrently against different
+ * fds; without ROLE_TLS the cumulative counters race and end-of-run stats
+ * report wrong totals. The receiver thread's accumulated values get
+ * shipped back to main via do_recv_args at thread exit and merged before
+ * the final report. */
+ROLE_TLS int64 total_data_read = 0;
+ROLE_TLS int64 total_data_written = 0;
 
 char num_dev_ino_buf[4 + 8 + 8];
 

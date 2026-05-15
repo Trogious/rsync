@@ -31,7 +31,7 @@ extern int log_before_transfer;
 extern int stdout_format_has_i;
 extern int logfile_format_has_i;
 extern int want_xattr_optim;
-extern int csum_length;
+extern ROLE_TLS int csum_length;
 extern int read_batch;
 extern int write_batch;
 extern int batch_gen_fd;

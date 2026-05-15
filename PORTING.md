@@ -154,6 +154,53 @@ encodes in POSIX `W_EXITCODE` layout.
 - We don't support `waitpid(-1, ...)` for any-child wait. Easy to
   add if upstream uses it.
 
+## Cross-thread state on Windows
+
+rsync's generator and receiver are separate POSIX processes after
+`fork()`; on Windows they're threads of one process sharing every
+non-`ROLE_TLS` global. Several upstream patterns rely on
+process-isolation:
+
+- **Save-zero-restore** of `info_levels[INFO_FLIST]` and
+  `info_levels[INFO_PROGRESS]` in `generate_files`. Skipped on Windows
+  (`#ifndef WIN32_NATIVE` in generator.c). Without that, the
+  generator's zero blanks the receiver thread's `INFO_GTE(PROGRESS, 1)`
+  check and per-file `--progress` output silently disappears.
+
+- **Flip-do-flip-back** of option globals in three places: generator's
+  redo block (generator.c:2161–2199), receiver's per-file dispatch
+  (receiver.c:646–665, 987), and sender's redo handling
+  (sender.c:317–327). The variables involved fall into two groups:
+
+  - `csum_length` (io.c:74) is `ROLE_TLS` — both generator and
+    receiver legitimately need per-thread copies, and the variable has
+    no popt entry so there's no MSVC constant-initializer constraint.
+    `do_recv_args::snap_csum_length` carries the user-set initial
+    value across the thread fork.
+
+  - `make_backups`, `append_mode`, `sparse_files`, `update_only`,
+    `ignore_times`, `size_only`, `ignore_existing`,
+    `ignore_non_existing`, `max_size`, `min_size`, `always_checksum`
+    are NOT TLS. Most are read only by generator-side code (update_only
+    et al.), so the flip stays inside the generator's thread context.
+    `make_backups`, `append_mode`, and `sparse_files` ARE read by the
+    receiver, but they have `&var` entries in options.c's static
+    `long_options[]` table and MSVC rejects address-of-TLS in
+    constant initializers. The residual race window is narrow: the
+    generator only flips them inside its redo block, which fires only
+    on transfer-verification failure; converging with the receiver's
+    own per-file flip requires both threads to mutate the same byte
+    at the same instant on a corner-case path. Acceptable for now;
+    revisit if it ever bites.
+
+- **I/O byte counters** `total_data_read` and `total_data_written`
+  (io.c) are `+=` from both threads in `read_buf` / `write_buf`. Both
+  are `ROLE_TLS`; the receiver thread's accumulated values are written
+  back to `do_recv_args::ret_total_data_*` at thread exit and folded
+  into the main thread's counters before `--stats` reports. Without
+  this the per-thread counters get lost on thread teardown and the
+  reported transfer rate is wrong.
+
 ## Conventions
 
 - All Windows-specific code is gated by `#ifdef WIN32_NATIVE` (never `_WIN32`,

@@ -32,7 +32,7 @@ extern int stdout_format_has_i;
 extern int logfile_format_has_i;
 extern int want_xattr_optim;
 extern int xfer_sum_len;
-extern int csum_length;
+extern ROLE_TLS int csum_length;     /* see io.c */
 extern int append_mode;
 extern int copy_links;
 extern int io_error;
