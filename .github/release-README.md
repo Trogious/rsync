@@ -53,7 +53,7 @@ character-set hint).
 Capabilities:
     64-bit files, 16-bit inums, 64-bit timestamps, 64-bit long ints,
     no socketpairs, symlinks, no symtimes, hardlinks, no hardlink-specials,
-    no hardlink-symlinks, no IPv6, atimes, batchfiles, inplace, append,
+    no hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append,
     no ACLs, no xattrs, optional secluded-args, iconv, no prealloc, stop-at,
     no crtimes
 Optimizations:
@@ -170,7 +170,6 @@ Cross-cutting Windows pieces this required:
 - **`--config=FILE`** — rsyncd.conf parsing.
 - **ACLs (`-A` / `--acls`)** — Windows ACLs don't map cleanly onto the POSIX ACL model the protocol carries.
 - **Extended attributes (`-X` / `--xattrs`)** — same reason.
-- **IPv6** — outbound IPv4 SSH works; the Windows build doesn't currently negotiate IPv6 sockets.
 - **POSIX ownership** — `chown` / `lchown` are no-ops. uid/gid metadata on the wire is silently dropped on the Windows side; `--owner`/`--group` flags don't error but have no effect.
 - **SELinux contexts.**
 
