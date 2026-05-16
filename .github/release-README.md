@@ -19,9 +19,21 @@ as a daemon (`--daemon`) is not supported.
 ## Quick start
 
 ```
+# SSH transport (recommended for most uses):
 rsync.exe -av source/ user@host:/dest/
 rsync.exe -av user@host:/source/ C:\dest\
 rsync.exe -av C:\Users\me\photos\ D:\backup\photos\
+
+# Connecting to a remote rsync daemon (rsync://):
+rsync.exe rsync://host/                              # list modules
+rsync.exe rsync://host/mod/                          # list module contents
+rsync.exe -av rsync://host/mod/path/ C:\dest\        # pull
+rsync.exe -av C:\src\ rsync://host/mod/path/         # push (if module is read-write)
+# Password via RSYNC_PASSWORD env var, --password-file=FILE,
+# or interactive prompt. The protocol is plain TCP -- for
+# sensitive transfers, tunnel through SSH first:
+#   ssh -L 8730:localhost:873 user@host
+#   rsync rsync://localhost:8730/mod/path .
 ```
 
 UTF-8 filenames work transparently — the manifest baked into the binary
@@ -117,14 +129,31 @@ A single umbrella header pulls in:
 - `passwd`/`group` stubs that always return `NULL` (no `/etc/passwd`)
 - `chown`/`lchown` → no-op (POSIX ownership doesn't map onto Windows ACLs in a useful way)
 
-### Daemon-mode excision
+### Daemon-mode handling
 
-`--daemon`, `--config`, `rsync://...`, and `host::module` are deliberately removed:
+This build CONNECTS to remote rsync daemons (`rsync://host/module/path` and
+`host::module` syntax) but does NOT itself RUN as a daemon. Running a daemon
+on Windows would need an accept-loop, rsyncd.conf parsing, secrets-file
+auth, signal-driven config reload, and Windows service integration — out
+of scope for this port.
 
-- `clientserver.c`, `loadparm.c`, `access.c`, `authenticate.c` — entire file bodies wrapped in `#ifndef WIN32_NATIVE`.
-- `socket.c::start_accept_loop` only — the rest of `socket.c` (`open_socket_out`, `set_socket_options`) still compiles for outbound client use.
-- `options.c` rejects `--daemon` and `rsync://` URLs at argument-parse time with `RERR_UNSUPPORTED` (exit code 4).
-- `win32/stub_daemon.c` provides linker stubs for daemon-only symbols still referenced from common code paths (the daemon-mode references are dead at runtime; they exist only to satisfy the linker).
+- `clientserver.c`, `authenticate.c` — compile with per-function gating:
+  the CLIENT side (`start_socket_client`, `exchange_protocols`,
+  `start_inband_exchange`, `auth_client`, `getpassf`, `base64_encode`)
+  builds on Windows; daemon-only helpers (`start_pre_exec`,
+  `rsync_module`, `send_listing`, `become_daemon`, `auth_server`,
+  `check_secret`, `gen_challenge`) stay wrapped in `#ifndef WIN32_NATIVE`.
+- `loadparm.c`, `access.c` — still wrapped whole; no daemon = no rsyncd.conf parsing or IP-acl needed.
+- `socket.c::start_accept_loop` only — the rest of `socket.c` (`open_socket_out`, `set_socket_options`) compiles for outbound client use.
+- `options.c` rejects `--daemon` at argument-parse time with `RERR_UNSUPPORTED` (exit code 4). `rsync://` URLs are accepted and parsed normally.
+- `win32/stub_daemon.c` provides linker stubs for daemon-only entry points still addressed by common code paths (`start_daemon`, `daemon_main`, `start_accept_loop`, the `lp_*` rsyncd.conf accessors).
+
+Cross-cutting Windows pieces this required:
+
+- `WSAStartup` in `main()` — SSH-mode transfers never used a socket directly; rsync:// does.
+- `win32/win_sock_io.c` (read/write/close shim) — winsock's `socket()` returns a SOCKET handle that's NOT in the CRT's fd table. `_read`/`_write`/`_close` on it would trigger MSVC's invalid-parameter handler and abort the process. The shim consults a per-process bitmap of socket fds (populated by `open_socket_out`) and routes those fds to `recv`/`send`/`closesocket`; non-socket fds pass through to the CRT unchanged.
+- `win32/win_select.c` checks the same bitmap before `_get_osfhandle` (which would also abort on a raw-SOCKET fd).
+- `win32/win_getpass.c` — MSVC dropped `_getpass`; `auth_client`'s interactive password prompt needs an echo-disabled console read via `ReadConsoleA` + `SetConsoleMode`.
 
 ### Optimization paths
 
