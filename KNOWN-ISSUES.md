@@ -6,16 +6,24 @@ The following upstream rsync features are intentionally excised or stubbed:
 
 - `--daemon` mode (run as `rsyncd`)
 - `--config=FILE` (rsyncd.conf parsing)
-- `rsync://host/module/path` URLs (daemon connections)
-- Connecting to a remote daemon via `host::module` syntax
 - ACLs (`-A` / `--acls`)
 - Extended attributes (`-X` / `--xattrs`)
 - chown / chgrp on the receiving Windows side
 - SELinux contexts
 
-Use rsync-over-ssh instead of daemon mode. ACL/xattr/POSIX-ownership flags
-will silently no-op on the Windows side; the wire protocol still negotiates
-them when talking to a Linux peer.
+ACL/xattr/POSIX-ownership flags will silently no-op on the Windows
+side; the wire protocol still negotiates them when talking to a Linux
+peer.
+
+## Supported
+
+- `rsync://host[:port]/module/path` URLs and `host::module/path` syntax
+  for connecting OUT to a remote rsync daemon. Password auth via
+  `RSYNC_PASSWORD` env var, `--password-file=FILE`, or interactive
+  prompt. The daemon protocol is plain TCP -- there's no transport
+  encryption; for sensitive transfers, tunnel through SSH
+  (`ssh -L 8730:localhost:873 user@host` then
+  `rsync rsync://localhost:8730/mod/path .`).
 
 ## Path parsing: drive-relative form
 

@@ -20,11 +20,11 @@
 
 #include "rsync.h"
 
-/* Entire file excised on Windows: rsync daemon auth isn't used.
- * Note: we don't currently support rsync-over-ssl on Windows either;
- * if that changes, the base64 helpers here could be moved to a
- * non-daemon translation unit. */
-#ifndef WIN32_NATIVE
+/* On Windows the server-side daemon auth functions (gen_challenge,
+ * check_secret, auth_server) stay excised below. The CLIENT side --
+ * auth_client + its supporting helpers generate_hash / getpassf /
+ * base64_encode -- is compiled in so the rsync:// client can answer
+ * a daemon's auth challenge. See PORTING.md "rsync:// client". */
 
 #include "itypes.h"
 #include "ifuncs.h"
@@ -64,7 +64,11 @@ void base64_encode(const char *buf, int len, char *out, int pad)
 	out[i] = '\0';
 }
 
-/* Generate a challenge buffer and return it base64-encoded. */
+#ifndef WIN32_NATIVE
+/* Generate a challenge buffer and return it base64-encoded. Server-side:
+ * the daemon hands a fresh challenge to the connecting client. The
+ * client only consumes challenges, never produces them, so this stays
+ * excised on the rsync:// client build. */
 static void gen_challenge(const char *addr, char *challenge)
 {
 	char input[32];
@@ -86,6 +90,7 @@ static void gen_challenge(const char *addr, char *challenge)
 
 	base64_encode(digest, len, challenge, 0);
 }
+#endif /* !WIN32_NATIVE */
 
 /* Generate an MD4 hash created from the combination of the password
  * and the challenge string and return it base64-encoded. */
@@ -102,8 +107,10 @@ static void generate_hash(const char *in, const char *challenge, char *out)
 	base64_encode(buf, len, out, 0);
 }
 
+#ifndef WIN32_NATIVE
 /* Return the secret for a user from the secret file, null terminated.
- * Maximum length is len (not counting the null). */
+ * Maximum length is len (not counting the null). Server-only -- the
+ * daemon reads its rsyncd secrets file. */
 static const char *check_secret(int module, const char *user, const char *group,
 				const char *challenge, const char *pass)
 {
@@ -176,6 +183,7 @@ static const char *check_secret(int module, const char *user, const char *group,
 
 	return err;
 }
+#endif /* !WIN32_NATIVE -- end check_secret */
 
 static const char *getpassf(const char *filename)
 {
@@ -223,8 +231,9 @@ static const char *getpassf(const char *filename)
 	exit_cleanup(RERR_SYNTAX);
 }
 
+#ifndef WIN32_NATIVE
 /* Possibly negotiate authentication with the client.  Use "leader" to
- * start off the auth if necessary.
+ * start off the auth if necessary. Server-only.
  *
  * Return NULL if authentication failed.  Return "" if anonymous access.
  * Otherwise return username.
@@ -351,6 +360,7 @@ char *auth_server(int f_in, int f_out, int module, const char *host,
 
 	return strdup(line);
 }
+#endif /* !WIN32_NATIVE -- end auth_server */
 
 void auth_client(int fd, const char *user, const char *challenge)
 {
@@ -381,5 +391,3 @@ void auth_client(int fd, const char *user, const char *challenge)
 	generate_hash(pass, challenge, pass2);
 	io_printf(fd, "%s %s\n", user, pass2);
 }
-
-#endif /* !WIN32_NATIVE */

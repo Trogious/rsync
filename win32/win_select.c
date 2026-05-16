@@ -48,20 +48,21 @@ static int classify_fd(int fd, HANDLE *out_handle)
 {
     /* Returns: 0 = invalid, 1 = socket, 2 = pipe, 3 = other (regular file/console).
      *
-     * Discrimination strategy:
-     *   - fd whose _get_osfhandle is -1/-2: fd is a raw SOCKET cast to int
-     *     (rsync's daemon path does this; excised on Windows but harmless).
-     *   - fd whose underlying HANDLE has FILE_TYPE_PIPE: either an anon
-     *     pipe from CreatePipe (us) or a socket whose AFD driver maps to
-     *     FILE_TYPE_PIPE. We use GetNamedPipeInfo to disambiguate — it
-     *     succeeds on pipes (both read and write ends, named or anon)
-     *     and fails with ERROR_INVALID_HANDLE on sockets.  Important:
-     *     PeekNamedPipe only works on the read end, so it's the wrong
-     *     test here.
-     *   - Otherwise FILE_TYPE_DISK / FILE_TYPE_CHAR / etc.: regular file
-     *     or console — treat as always-ready for both read and write
-     *     (rsync only passes these in error-mode redirects).
+     * Check the explicit socket registry FIRST: rsync's rsync:// client
+     * path passes raw SOCKET handles as fds. _get_osfhandle on a non-CRT
+     * fd doesn't just return -1, it triggers MSVC's invalid-parameter
+     * handler which aborts the whole process. The registry (populated
+     * by win_fd_register_socket at socket() time) lets us recognise
+     * sockets without ever asking the CRT.
+     *
+     * For real CRT fds we still use _get_osfhandle / GetFileType /
+     * GetNamedPipeInfo to distinguish pipes vs files vs CRT-wrapped
+     * sockets, exactly as before.
      */
+    if (win_fd_is_socket_q(fd)) {
+        *out_handle = (HANDLE)(intptr_t)fd;
+        return 1;
+    }
     intptr_t h = _get_osfhandle(fd);
     if (h == -1 || h == -2) {
         *out_handle = (HANDLE)(intptr_t)fd;

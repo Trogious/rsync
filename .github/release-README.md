@@ -10,6 +10,10 @@ same wire format, same command-line — compiled with MSVC against a fully
 static dependency set. **No Cygwin, no MSYS2 runtime, no DLL bundle.**
 Drop `rsync.exe` anywhere on a Win10+ machine and it runs.
 
+Connect via SSH (`rsync user@host:/path/ .`) or directly to a remote
+rsync daemon (`rsync rsync://host/module/path .`). Running rsync ITSELF
+as a daemon (`--daemon`) is not supported.
+
 ---
 
 ## Quick start
@@ -134,8 +138,6 @@ A single umbrella header pulls in:
 ### Excised features
 
 - **`--daemon` mode** — rsync as a TCP service (`rsyncd`). Exits with code 4 (`RERR_UNSUPPORTED`).
-- **`rsync://host/module/path` URLs** — daemon-mode client connections. Exits with code 4.
-- **`host::module` syntax** — also daemon-mode. Exits with code 4.
 - **`--config=FILE`** — rsyncd.conf parsing.
 - **ACLs (`-A` / `--acls`)** — Windows ACLs don't map cleanly onto the POSIX ACL model the protocol carries.
 - **Extended attributes (`-X` / `--xattrs`)** — same reason.

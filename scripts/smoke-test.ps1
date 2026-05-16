@@ -70,12 +70,19 @@ if ($LASTEXITCODE -ne 4) {
     Write-Host 'OK: --daemon -> RERR_UNSUPPORTED'
 }
 
-Write-Host '== rsync:// URL rejected =='
+Write-Host '== rsync:// URL accepted, connect attempt fails =='
+# rsync:// daemon-URL client mode IS supported. We don't have a daemon
+# to talk to in the smoke test, but pointing at a host that won't
+# resolve should fail with RERR_SOCKETIO (10) rather than the
+# RERR_UNSUPPORTED (4) the old build returned -- proving the parser
+# accepts the URL and the binary tries to connect.
 cmd /c "`"$Binary`" rsync://example.invalid/mod/path . 2>nul"
-if ($LASTEXITCODE -ne 4) {
-    Write-Warning "Expected exit 4 (RERR_UNSUPPORTED) for rsync://, got $LASTEXITCODE"
+if ($LASTEXITCODE -eq 4) {
+    throw "rsync:// URL was rejected as unsupported (exit 4); expected a connection error."
+} elseif ($LASTEXITCODE -eq 0) {
+    throw "rsync:// to example.invalid unexpectedly succeeded (exit 0)."
 } else {
-    Write-Host 'OK: rsync:// -> RERR_UNSUPPORTED'
+    Write-Host "OK: rsync:// parsed + connection attempt failed (exit $LASTEXITCODE)"
 }
 
 Write-Host ''

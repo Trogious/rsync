@@ -201,6 +201,44 @@ process-isolation:
   this the per-thread counters get lost on thread teardown and the
   reported transfer rate is wrong.
 
+## rsync:// client
+
+The rsync daemon-URL CLIENT path is supported on Windows even though
+the daemon itself isn't. clientserver.c and authenticate.c are no
+longer file-wrapped in `#ifndef WIN32_NATIVE`; instead the daemon-only
+functions (start_daemon, daemon_main, become_daemon, rsync_module,
+auth_server, etc.) are wrapped individually, leaving the client-facing
+trio compilable on Windows:
+
+- `start_socket_client` (clientserver.c) — TCP connect + handshake.
+- `exchange_protocols` (clientserver.c) — shared `@RSYNCD:` greeter.
+- `start_inband_exchange` (clientserver.c) — module / args / auth round trip.
+- `auth_client` (authenticate.c) — MD5 challenge response.
+
+Cross-cutting Windows pieces this required:
+
+- **WSAStartup** at the top of main(). SSH-mode never used a socket
+  directly; the rsync:// path does.
+- **Socket I/O shim** (`win32/win_sock_io.c`). socket() returns a SOCKET
+  handle that's NOT in the CRT's fd table; read/write/close on it would
+  trigger MSVC's invalid-parameter handler and abort the process with
+  exit code 127 (no error output). The shim maintains a per-process
+  bitmap of "fd is a SOCKET" populated by socket() and consulted on
+  every read/write/close to route socket fds to recv/send/closesocket.
+  win_compat.h installs `#define read win_read` etc. so every caller
+  in the codebase hits the shim.
+- **getpass shim** (`win32/win_getpass.c`). MSVC dropped _getpass
+  decades ago; auth_client needs a no-echo terminal read for the
+  interactive password prompt. ReadConsoleA with ENABLE_ECHO_INPUT
+  toggled off, falling back to fgets() on non-TTY stdin.
+- **win_select.c** consults the socket bitmap before _get_osfhandle
+  because _get_osfhandle on a non-CRT fd also triggers the invalid-
+  parameter handler.
+
+`--daemon` itself (listening for inbound connections, becoming a
+daemon, rsyncd.conf parsing, secrets-file auth) remains excised --
+the entry points are still error stubs in `win32/stub_daemon.c`.
+
 ## Conventions
 
 - All Windows-specific code is gated by `#ifdef WIN32_NATIVE` (never `_WIN32`,

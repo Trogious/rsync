@@ -323,6 +323,15 @@ int open_socket_out(char *host, int port, const char *bind_addr, int af_hint)
 	freeaddrinfo(res0);
 	free(errnos);
 
+#ifdef WIN32_NATIVE
+	/* Register the SOCKET so read/write/close shims route to recv/send/
+	 * closesocket. The Windows CRT will abort the process on read/write
+	 * of an unrecognised fd, so we MUST tell our shim which fds are
+	 * sockets before any I/O on them. */
+	if (s >= 0)
+		win_fd_register_socket(s);
+#endif
+
 	return s;
 }
 

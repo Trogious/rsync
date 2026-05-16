@@ -21,11 +21,11 @@
 
 #include "rsync.h"
 
-/* Entire file is excised on Windows: rsync daemon mode is not
- * supported (see PORTING.md). The error stubs for entry points that
- * other source files reference (start_daemon, daemon_main,
- * start_socket_client) live in win32/stub_daemon.c. */
-#ifndef WIN32_NATIVE
+/* On Windows: daemon mode (--daemon, accept loop, rsyncd.conf) is not
+ * supported and remains excised below. The CLIENT side of rsync:// IS
+ * supported -- start_socket_client / start_inband_exchange / the shared
+ * exchange_protocols compile unconditionally, so the binary can connect
+ * out to a remote rsync daemon. See PORTING.md "rsync:// client". */
 
 #include "itypes.h"
 #include "ifuncs.h"
@@ -95,6 +95,8 @@ unsigned int module_dirlen = 0;
 char *full_module_path;
 
 static int rl_nulls = 0;
+
+#ifndef WIN32_NATIVE
 static int namecvt_fd_req = -1, namecvt_fd_ans = -1;
 
 #ifdef HAVE_SIGACTION
@@ -102,6 +104,7 @@ static struct sigaction sigact;
 #endif
 
 static item_list gid_list = EMPTY_ITEM_LIST;
+#endif /* !WIN32_NATIVE */
 
 /* Used when "reverse lookup" is off. */
 const char undetermined_hostname[] = "UNDETERMINED";
@@ -423,6 +426,13 @@ int start_inband_exchange(int f_in, int f_out, const char *user, int argc, char 
 
 	return 0;
 }
+
+/* ===== Below this line: daemon / server-only code, excised on Windows.
+ * The rsync:// client doesn't need any of it; everything from
+ * read_arg_from_pipe (server pre-exec helpers) down through the
+ * daemon mainloop (start_daemon, daemon_main, become_daemon) is
+ * unreachable when --daemon is rejected at argument-parse time. ===== */
+#ifndef WIN32_NATIVE
 
 #if defined HAVE_SETENV || defined HAVE_PUTENV
 static int read_arg_from_pipe(int fd, char *buf, int limit)

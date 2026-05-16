@@ -99,7 +99,7 @@ fi
 
 if test x$windows_native = xyes; then
     LIBS="$LIBS -lws2_32 -ladvapi32 -liphlpapi -lcrypt32 -lsecur32 -luserenv"
-    WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_thread.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/win_select.o win32/stub_daemon.o"
+    WIN32_OBJS="win32/win_spawn.o win32/win_fork.o win32/win_thread.o win32/win_paths.o win32/win_fs.o win32/win_ssh.o win32/win_select.o win32/win_getpass.o win32/win_sock_io.o win32/stub_daemon.o"
     # Pulled into the HEADERS list so changes to the Windows umbrella
     # header trigger a rebuild of every .c file. config.h pulls in
     # win_compat.h via AH_BOTTOM (above), but make doesn't follow

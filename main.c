@@ -2083,6 +2083,21 @@ int main(int argc,char *argv[])
 		_setmode(0, 0x8000 /* _O_BINARY */);
 		_setmode(1, 0x8000 /* _O_BINARY */);
 	}
+	/* Winsock requires WSAStartup before any socket / getaddrinfo /
+	 * gethostbyname call. SSH-mode transfers never touched a socket
+	 * (the ssh subprocess owned its own), but the rsync:// client
+	 * path goes straight from main into clientserver.c::
+	 * start_socket_client which calls getaddrinfo with no init. We
+	 * don't call WSACleanup explicitly -- process teardown does it. */
+	{
+		WSADATA wsa;
+		int wsa_err = WSAStartup(MAKEWORD(2, 2), &wsa);
+		if (wsa_err) {
+			fprintf(stderr,
+				"WSAStartup failed: error %d\n", wsa_err);
+			return RERR_SOCKETIO;
+		}
+	}
 #ifdef WIN_CRASH_TRACE
 	/* Off by default; enable at configure time with
 	 * --enable-win-crash-trace to opt into per-crash log files. */

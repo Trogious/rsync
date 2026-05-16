@@ -86,6 +86,23 @@ __declspec(dllimport) int      __cdecl _chsize_s(int fd, __int64 size);
 }
 #endif
 
+/* read / write / close shims that handle raw Winsock SOCKETs alongside
+ * regular C runtime fds. socket() returns a SOCKET that's NOT in the
+ * CRT's fd table, so direct read/write/close on it aborts the process
+ * via the CRT's invalid-parameter handler. The shims look up the fd in
+ * a small registry (populated by win_fd_register_socket at socket-open
+ * time) and route socket fds to recv/send/closesocket. See
+ * win32/win_sock_io.c for details. */
+void win_fd_register_socket(int fd);
+void win_fd_unregister_socket(int fd);
+int  win_fd_is_socket_q(int fd);  /* read-only query; used by win_select.c */
+int  win_read(int fd, void *buf, unsigned int count);
+int  win_write(int fd, const void *buf, unsigned int count);
+int  win_close(int fd);
+#define read(fd, buf, n)  win_read((fd), (buf), (unsigned)(n))
+#define write(fd, buf, n) win_write((fd), (buf), (unsigned)(n))
+#define close(fd)         win_close(fd)
+
 /* ftruncate(fd, length): POSIX returns 0 / -1 with errno set. MSVC's
  * equivalent is _chsize_s which returns the errno value directly (and
  * does NOT touch the global errno). Bridge the two conventions so
@@ -467,6 +484,16 @@ static __inline void           endpwent(void)            { }
 static __inline void           endgrent(void)            { }
 static __inline struct passwd *getpwent(void)            { return NULL; }
 static __inline struct group  *getgrent(void)            { return NULL; }
+
+/* getpass(): POSIX terminal password prompt with echo disabled. MSVC's
+ * CRT removed _getpass long ago; reimplement via the console API.
+ * The returned pointer is to a static buffer (matches POSIX), so the
+ * caller must not rely on it surviving a second call. Falls back to
+ * fgets() on stdin if the console handle isn't a real TTY (pipe /
+ * redirect), so password files / RSYNC_PASSWORD-style flows still
+ * work. authenticate.c::auth_client is the only caller. */
+char *win_getpass(const char *prompt);
+#define getpass(p) win_getpass(p)
 
 /* syslog — daemon-only, so we just provide constants + no-op stubs. */
 #ifndef LOG_PID

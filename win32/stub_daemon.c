@@ -1,12 +1,19 @@
 /* win32/stub_daemon.c
  *
- * Error stubs for daemon-only entry points that we excise on Windows.
- * The corresponding upstream source files (clientserver.c, socket.c,
- * loadparm.c, access.c, authenticate.c) are wrapped in
- * `#ifndef WIN32_NATIVE` so they compile to empty translation units on
- * Windows; the symbols below satisfy any remaining references.
- *
- * Replaced/expanded in Phase 6.
+ * Linker stubs for daemon-side symbols that the Windows build doesn't
+ * implement. Since 7f278cca the rsync:// CLIENT side compiles (the
+ * relevant chunks of clientserver.c + authenticate.c are now built on
+ * Windows), so this file is the smaller residual:
+ *   - --daemon entry points (start_daemon / daemon_main / become_daemon
+ *     / start_accept_loop) -- still rejected at parse time, but the
+ *     linker still wants the symbols since they're addressed elsewhere.
+ *   - rsyncd.conf accessor functions lp_*() from loadparm.c -- the
+ *     daemon-mode reads of these are unreachable when --daemon is
+ *     refused, but a couple of code paths consult them defensively
+ *     (module_id == -1 short-circuit) and need a real function to
+ *     return-sentinel from.
+ *   - A few daemon-side globals (namecvt_pid, daemon_chmod_modes)
+ *     read in dead branches of rsync.c / generator.c.
  */
 #include "rsync.h"
 
@@ -35,34 +42,10 @@ void start_accept_loop(int port, int (*fn)(int, int))
     exit_cleanup(RERR_UNSUPPORTED);
 }
 
-int start_socket_client(char *host,
-                        int remote_argc, char *remote_argv[],
-                        int argc, char *argv[])
-{
-    (void)host; (void)remote_argc; (void)remote_argv;
-    (void)argc; (void)argv;
-    rprintf(FERROR,
-        "rsync:// daemon connections are not supported in this Windows build\n");
-    return RERR_UNSUPPORTED;
-}
-
-/* Daemon-side globals & functions referenced from client-side code paths.
- * On Linux these come from loadparm.c / clientserver.c / authenticate.c
- * which we wrapped in #ifndef WIN32_NATIVE for the Windows build. The
- * client code paths that touch them are dead in our client-only build
- * (module_id stays -1 == "not running as daemon"); the stubs exist only
- * to satisfy the linker. */
-int   module_id        = -1;
-int   namecvt_pid      = 0;
-int   read_only        = 0;
-char *daemon_auth_choices = NULL;
-char *module_dir       = NULL;
-unsigned int module_dirlen = 0;
-char *auth_user        = NULL;
-char *full_module_path = NULL;
-const char undetermined_hostname[] = "UNDETERMINED";
-
-/* Signatures here must exactly match proto.h. */
+/* Signatures here must exactly match proto.h. The daemon-config
+ * accessors stay stubbed -- there is no rsyncd.conf parser linked in
+ * (loadparm.c is still excised), and the client-mode reads of these
+ * are all guarded by module_id != -1 which never fires. */
 BOOL  lp_ignore_nonreadable(int m) { (void)m; return 0; }
 char *lp_dont_compress(int m)      { (void)m; return ""; }
 char *lp_name(int m)               { (void)m; return ""; }
@@ -77,13 +60,11 @@ char *lp_syslog_tag(int m)         { (void)m; return NULL; }
 int   lp_syslog_facility(int m)    { (void)m; return 0; }
 BOOL  lp_reverse_lookup(int m)     { (void)m; return 0; }
 BOOL  lp_write_only(int m)         { (void)m; return 0; }
-
-int  start_inband_exchange(int f_in, int f_out, const char *user, int argc, char *argv[])
-{
-    (void)f_in; (void)f_out; (void)user; (void)argc; (void)argv;
-    rprintf(FERROR, "rsync daemon connections are not supported in this Windows build\n");
-    return RERR_UNSUPPORTED;
-}
+/* exchange_protocols calls this only when am_client=0 (server side
+ * generating the @RSYNCD greeting). We're client-only, so this is
+ * never actually invoked at runtime; the stub exists only to
+ * satisfy the link. */
+char *lp_motd_file(void)           { return NULL; }
 
 void set_env_num(const char *var, long num)
 {
@@ -103,26 +84,17 @@ BOOL set_dparams(int syntax_check_only)
 /* daemon_chmod_modes is a *pointer* (struct chmod_mode_struct *) on the
  * daemon-side code path — NOT a function. rsync.c::set_file_attrs reads
  * it as `if (daemon_chmod_modes && !S_ISLNK(...)) new_mode =
- * tweak_mode(new_mode, daemon_chmod_modes);`. An earlier version of this
- * stub defined it as a function, which made the linker take the function
- * address — a non-NULL pointer — and pass it as a struct ptr to
- * tweak_mode. tweak_mode then read garbage from the function's machine
- * code as the chmod_mode_struct fields and crashed. */
+ * tweak_mode(new_mode, daemon_chmod_modes);`. An earlier version of
+ * this stub defined it as a function, which made the linker take the
+ * function address — a non-NULL pointer — and pass it as a struct ptr
+ * to tweak_mode. tweak_mode then read garbage from the function's
+ * machine code as the chmod_mode_struct fields and crashed. */
 struct chmod_mode_struct *daemon_chmod_modes = NULL;
 
 int  namecvt_call(const char *cmd, const char **name_p, id_t *id_p)
 {
     (void)cmd; (void)name_p; (void)id_p;
     return 0;
-}
-
-/* base64_encode lives in authenticate.c (excised). socket.c references
- * it via establish_proxy_connection which we never enter in client mode
- * because that code path requires HTTP CONNECT support. */
-void base64_encode(const char *buf, int len, char *out, int pad)
-{
-    (void)buf; (void)len; (void)pad;
-    if (out) out[0] = '\0';
 }
 
 #endif /* WIN32_NATIVE */

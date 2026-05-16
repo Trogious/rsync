@@ -3184,12 +3184,6 @@ char *check_for_hostspec(char *s, char **host_ptr, int *port_ptr)
 #endif
 
 	if (port_ptr && strncasecmp(URL_PREFIX, s, strlen(URL_PREFIX)) == 0) {
-#ifdef WIN32_NATIVE
-		rprintf(FERROR,
-			"rsync:// URLs (daemon connections) are not supported in this Windows build.\n"
-			"Use rsync-over-ssh: rsync user@host:/path/ destination/\n");
-		exit_cleanup(RERR_UNSUPPORTED);
-#endif
 		*host_ptr = parse_hostspec(s + strlen(URL_PREFIX), &path, port_ptr);
 		if (*host_ptr) {
 			if (!*port_ptr)
