@@ -261,6 +261,15 @@ int open_socket_out(char *host, int port, const char *bind_addr, int af_hint)
 		s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (s < 0)
 			continue;
+#ifdef WIN32_NATIVE
+		/* Register the socket BEFORE any close-on-error paths so
+		 * win_close routes it to closesocket. Otherwise close(s) on
+		 * a raw SOCKET hits MSVC's invalid-parameter handler and
+		 * aborts the process. This case triggers when getaddrinfo
+		 * returns multiple addresses (e.g. IPv4+IPv6) and the
+		 * first connect attempt fails. */
+		win_fd_register_socket(s);
+#endif
 
 		if (bind_addr
 		 && try_bind_local(s, res->ai_family, type,
@@ -322,15 +331,6 @@ int open_socket_out(char *host, int port, const char *bind_addr, int af_hint)
 
 	freeaddrinfo(res0);
 	free(errnos);
-
-#ifdef WIN32_NATIVE
-	/* Register the SOCKET so read/write/close shims route to recv/send/
-	 * closesocket. The Windows CRT will abort the process on read/write
-	 * of an unrecognised fd, so we MUST tell our shim which fds are
-	 * sockets before any I/O on them. */
-	if (s >= 0)
-		win_fd_register_socket(s);
-#endif
 
 	return s;
 }
